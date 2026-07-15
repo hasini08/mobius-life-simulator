@@ -1,0 +1,15 @@
+# Build artifacts - regenerate via src/build_*.py, large, not needed to run the app
+output/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Local Claude Code settings (machine-specific permission allowlist)
+.claude/settings.local.json
+
+# OS
+.DS_Store
+Thumbs.db
