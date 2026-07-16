@@ -27,7 +27,11 @@ from engine import (
     sensitivity_withdrawal_rate, sensitivity_guardrail_band, run_glide_path_simulation,
     asset_correlation_matrix, shortfall_heatmap, run_mortality_overlay, weighted_monthly_returns,
 )
-from portfolios import PORTFOLIOS, portfolio_summary, weighted_avg_fee, asset_class_weights, AC
+import portfolios as portfolios_mod
+from portfolios import (
+    PORTFOLIOS, portfolio_summary, weighted_avg_fee, asset_class_weights, AC,
+    HOLDINGS_CSV, ASSET_MAP_CSV,
+)
 from mortality import load_mortality_table, survival_curve, joint_survival_curve, life_expectancy
 import tax
 import cma as cma_mod
@@ -73,6 +77,24 @@ def ordered_names(names) -> list:
     (Aspen Four Seasons, Mobius Better), regardless of sidebar selection order."""
     order = ["Original", "Alternative", "Four Seasons", "Better"]
     return [n for n in order if n in names] + [n for n in names if n not in order]
+
+
+def save_portfolios_to_csv(portfolios_dict: dict, path=HOLDINGS_CSV) -> None:
+    """Writes the full current (possibly session-edited) PORTFOLIOS dict back to the long-format
+    holdings sheet, so edits persist as the new default for future sessions/restarts - not just
+    this one. Overwrites the whole file (all portfolios), matching what portfolios.py itself loads."""
+    rows = []
+    for name, holdings in portfolios_dict.items():
+        for holding, asset_class, weight, ocf in holdings:
+            rows.append({"Portfolio": name, "Holding": holding, "AssetClass": asset_class,
+                         "Weight": weight, "OCF": ocf})
+    pd.DataFrame(rows).to_csv(path, index=False)
+
+
+def save_asset_map_to_csv(ac_dict: dict, path=ASSET_MAP_CSV) -> None:
+    """Writes the full current (possibly session-extended) AC label->column map back to its sheet."""
+    rows = [{"Label": k, "BloombergColumn": v} for k, v in ac_dict.items()]
+    pd.DataFrame(rows).to_csv(path, index=False)
 
 
 def historical_stats(name, asset_df):
@@ -370,6 +392,76 @@ with st.sidebar:
              "Better) - the Accumulation section above always shows Aspen Original vs Mobius "
              "Alternative regardless of this selection.",
     )
+
+    with st.expander("📤 Add new asset-class return data"):
+        st.caption(
+            "Upload a CSV with a Date column plus one or more monthly-return columns (e.g. the "
+            "previous model's Hedge Fund Credit Suisse / HF Trend / Novum Mgd Vol series) to make "
+            "them selectable as asset classes in the portfolio editor below - no code changes needed. "
+            "Values should be monthly simple returns as fractions (e.g. 0.0123 for 1.23%)."
+        )
+        uploaded_asset_file = st.file_uploader("Asset-class return data (CSV)", type="csv",
+                                                key="asset_upload")
+        if uploaded_asset_file is not None:
+            try:
+                new_data = pd.read_csv(uploaded_asset_file)
+                date_col = new_data.columns[0]
+                new_data[date_col] = pd.to_datetime(new_data[date_col])
+                new_data = new_data.set_index(date_col)
+                new_data.index = new_data.index.to_period("M").to_timestamp("M")
+                new_data.index.name = asset_df.index.name
+                new_cols = [c for c in new_data.columns if c not in asset_df.columns]
+                if not new_cols:
+                    st.warning("No new columns found (names already exist or file has none besides Date).")
+                else:
+                    asset_df = asset_df.join(new_data[new_cols], how="outer")
+                    for c in new_cols:
+                        AC[c] = c  # label == column name directly; no separate short-name needed
+                    st.success(f"Added {len(new_cols)} asset class(es): {', '.join(new_cols)} - "
+                               "now selectable in the portfolio editor below.")
+                    if st.button("💾 Save uploaded data as new default", key="save_asset_upload"):
+                        asset_df.to_csv(portfolios_mod.DATA_DIR / "asset_class_returns.csv")
+                        save_asset_map_to_csv(AC)
+                        st.success("Saved - available in future sessions too.")
+            except Exception as e:
+                st.error(f"Couldn't read this file: {e}")
+
+    with st.expander("✏️ Edit portfolio holdings & fees"):
+        st.caption(
+            "Edit any portfolio's holdings, asset-class mapping or fee directly - every chart and "
+            "statistic below recalculates immediately, no code changes needed. 'Save as new "
+            "default' writes your edit to data/portfolio_holdings.csv so it's still there next time "
+            "the app starts; without saving, edits only last for this session."
+        )
+        edit_name = st.selectbox("Portfolio to edit", list(PORTFOLIOS.keys()),
+                                  format_func=display_name, key="edit_portfolio_name")
+        edit_df = portfolio_summary(edit_name)[["Holding", "AssetClass", "Weight", "OCF"]]
+        edited_df = st.data_editor(
+            edit_df, num_rows="dynamic", key=f"editor_{edit_name}", use_container_width=True,
+            column_config={
+                "AssetClass": st.column_config.SelectboxColumn("Asset class", options=list(AC.keys())),
+                "Weight": st.column_config.NumberColumn("Weight", format="%.4f", min_value=0.0,
+                                                          max_value=1.0, step=0.005),
+                "OCF": st.column_config.NumberColumn("OCF (fee)", format="%.4f", min_value=0.0,
+                                                      max_value=0.05, step=0.0001),
+            },
+        )
+        edited_df = edited_df.dropna(subset=["Holding", "AssetClass", "Weight", "OCF"])
+        total_w = edited_df["Weight"].sum()
+        st.caption(
+            f"Total weight: {total_w:.1%}"
+            + ("" if abs(total_w - 1.0) < 0.01 else " — doesn't sum to 100%, carried through as-is "
+                                                     "(not auto-normalised), same as the source data.")
+        )
+        # Mutates the SAME dict object engine.py imported (from portfolios import PORTFOLIOS) - so
+        # every downstream function that reads PORTFOLIOS[name] picks this up immediately, with no
+        # other code changes needed. Re-applied fresh every rerun from the editor's current state.
+        PORTFOLIOS[edit_name] = list(
+            edited_df[["Holding", "AssetClass", "Weight", "OCF"]].itertuples(index=False, name=None)
+        )
+        if st.button(f"💾 Save {display_name(edit_name)} as new default", key=f"save_{edit_name}"):
+            save_portfolios_to_csv(PORTFOLIOS)
+            st.success(f"Saved - {display_name(edit_name)} is now the default for future sessions too.")
 
     st.header("Guardrails")
     guardrails = st.checkbox(

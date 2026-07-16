@@ -683,11 +683,18 @@ def repeated_seeds_diagnostic(portfolio_name, asset_df, cpi_series, profile, met
     }
 
 
-def historical_single_path(portfolio_name, asset_df, cpi_series, profile: ClientProfile, start_date=None):
+def historical_single_path(portfolio_name, asset_df, cpi_series, profile: ClientProfile, start_date=None,
+                            custom_weights=None, custom_fee=None):
     """Deterministic projection running the ACTUAL historical sequence of monthly returns from a
     chosen start date, for audit / reasonableness-check purposes (mirrors the old model's
     'Model Hist' sheet, and the Excel workbook's 'Historical Projection' sheet - the two are cross-
     checked to match to the penny).
+
+    If custom_weights (a pandas Series of asset-class weights) is supplied, it overrides the named
+    portfolio's weights (custom_fee likewise overrides the fee) - mirrors run_simulation's own
+    custom_weights/custom_fee override, so an edited/ad-hoc portfolio's historical chart can be
+    computed without needing to be registered in portfolios.py. portfolio_name is still used as the
+    result's label in that case.
 
     NOTE: unlike run_simulation (which intersects returns with CPI's index because it needs PAIRED
     (return, inflation) draws for the bootstrap), this function does NOT drop return months that lack
@@ -697,7 +704,11 @@ def historical_single_path(portfolio_name, asset_df, cpi_series, profile: Client
     that year's last month (falling back to an earlier month if the current one isn't out yet), which
     is exactly what the Excel 'Portfolio Annual Returns' sheet does (COUNTIF/INDEX against the last
     non-blank CPI cell)."""
-    monthly_ret = portfolio_monthly_returns(portfolio_name, asset_df).dropna()
+    if custom_weights is not None:
+        fee = custom_fee if custom_fee is not None else weighted_avg_fee(portfolio_name)
+        monthly_ret = weighted_monthly_returns(custom_weights, fee, asset_df, label=portfolio_name).dropna()
+    else:
+        monthly_ret = portfolio_monthly_returns(portfolio_name, asset_df).dropna()
 
     if start_date is None:
         start_date = monthly_ret.index[0]
