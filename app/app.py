@@ -424,6 +424,68 @@ with st.expander("Glossary — plain-English meaning of the terms used on this p
         "of the spend once it starts."
     )
 
+with st.expander("All assumptions — what's baked into these numbers"):
+    st.markdown(
+        "**Data sources**\n"
+        "- Fund/asset-class return history: Bloomberg data (to 14 July 2026), plus the FNZ holdings "
+        "files for Four Seasons (14 July 2026) and Original/Alternative.\n"
+        "- Cash uses the real Bank of England SONIA rate, not the Bloomberg file's own cash column "
+        "(which implausibly showed a small negative rate).\n"
+        "- Inflation: actual historical UK CPI YoY (Bloomberg), not a fixed assumed rate — so "
+        "inflation risk feeds through into the probability-of-ruin figure itself.\n"
+        "- Mortality: the S4 pension-scheme table (CMI, UK self-administered pension scheme "
+        "experience), not a general-population table.\n"
+        "- Forward-looking returns (CMA slider): a compiled median across published third-party "
+        "long-run forecasts, blended with historical data — see `src/cma.py`.\n"
+        "- Annuity rates: real, dated UK best-buy rates (Hargreaves Lansdown, 14–28 May 2026), "
+        "**not** a personalised quote — actual quotes vary by provider, postcode and health.\n\n"
+        "**Portfolio construction**\n"
+        "- Every holding is mapped to the best-matching BROAD asset-class series (full history back "
+        "to 1999/2000) rather than its own short fund history, because many individual fund series "
+        "in the data are too short (some as little as 20 months) to bootstrap a 25+ year simulation "
+        "from directly.\n"
+        "- Aspen Original vs Mobius Alternative largely hold the SAME underlying index exposure (the "
+        "FNZ data literally labels several pairs 'Same Index') — the difference being compared is "
+        "fee (AMC), not market return.\n"
+        "- Four Seasons holdings/weights come from the FNZ data supplied 14 July 2026; a few holdings "
+        "are mapped to 'Commodities' as the closest available proxy for gold/natural-resources "
+        "exposure.\n"
+        "- Mobius Better's construction (11 holdings incl. global agg bonds, quality/managed-vol/EM "
+        "equities, HY/ABS/EM corporate credit, US property REITS, commodities, and two hedge-fund "
+        "strategies) is sourced from the previous Mobius model's own asset-class data, at a flat "
+        "0.07% pa fee across all holdings. Its own 11 return series only overlap from 2001, so "
+        "Mobius Better's usable historical window (2001-2025) is shorter than the main dataset's "
+        "(1999/2000-2026) — narrowing the historical data window above can't extend this.\n"
+        "- All fund/holding weights and fees can be viewed and edited live in the sidebar's 'Edit "
+        "data' tab — the numbers on this page always reflect whatever is currently in that editor, "
+        "not a fixed hardcoded lineup.\n\n"
+        "**Methodology simplifications**\n"
+        "- Monte Carlo sampling defaults to a stationary block bootstrap (Politis & Romano, 1994) "
+        "over actual monthly history, preserving serial correlation/momentum that a naive month-by-"
+        "month shuffle would destroy. A fixed-length block bootstrap and a skewed Student-t "
+        "parametric sampler are also available for comparison, but full multivariate-normal (MVN) "
+        "sampling across all asset classes jointly is not implemented.\n"
+        "- Mortality is assumed independent of market returns (a standard simplifying assumption).\n"
+        "- Tax + State Pension modelling is deliberately simplified for this first pass: the whole "
+        "pot is treated as a single taxable pension wrapper (every pound withdrawn counts as income) "
+        "— no 25% pension-commencement tax-free lump sum, and no separate ISA (tax-free) or GIA "
+        "(capital-gains) wrapper split is modelled. Rest-of-UK tax bands only (Scotland differs). "
+        "2026/27 tax bands and the State Pension are both held constant in today's money (assumed to "
+        "rise with inflation) for the whole horizon.\n"
+        "- No 25% pension-commencement tax-free lump sum is modelled before annuitizing either, "
+        "consistent with the tax simplification above.\n\n"
+        "**Known limitations**\n"
+        "- Short historical window: even the longest series only goes back to 1999/2000, so the "
+        "Monte Carlo is bootstrapping from roughly 25-27 years of market history — it has not lived "
+        "through, for example, a repeat of the 1970s stagflation shock.\n"
+        "- 'Better' portfolio weights were tuned empirically by testing candidate allocations through "
+        "this simulation engine itself, then replaced with a specific, since-confirmed real-world "
+        "construction ('Better v4') — it is one reasonable diversified construction, not the only "
+        "possible one.\n"
+        "- Restricting the historical data window (control above) makes Monte Carlo results noisier "
+        "the shorter it gets — a handful of years isn't much to bootstrap 30-year outcomes from."
+    )
+
 asset_df = load_asset_returns()
 cpi = load_cpi(asset_df)
 
@@ -449,6 +511,28 @@ with st.sidebar:
                        "around 3.5-4%, but the right number depends heavily on the portfolio, guardrails, "
                        "tax/State Pension and how long the money needs to last - that's what the rest of "
                        "this tool is for.")
+
+        st.header("Historical data window")
+        _data_min = asset_df.index.min().date()
+        _data_max = asset_df.index.max().date()
+        window_start, window_end = st.slider(
+            "Restrict every chart and statistic to this period",
+            min_value=_data_min, max_value=_data_max, value=(_data_min, _data_max),
+            help="Narrows ALL charts and statistics on this page to only this historical window - "
+                 "e.g. drag the left edge in to test the last 10 years instead of the full history, "
+                 "the way you'd test whether a conclusion still holds on more recent data. Each "
+                 "portfolio still only uses whatever of ITS OWN holdings' data falls within this "
+                 "window - narrowing it doesn't invent data a portfolio doesn't have.",
+        )
+        if window_start > _data_min or window_end < _data_max:
+            _years_shown = (window_end - window_start).days / 365.25
+            st.caption(f"Using {window_start} to {window_end} (~{_years_shown:.0f} years) instead of "
+                       "the full available history. Very short windows make Monte Carlo results "
+                       "noisier - a handful of years isn't much to bootstrap from.")
+        # NOTE: the actual asset_df filtering happens AFTER the sidebar block closes (not here) -
+        # tab_data below can add new asset-class columns via an outer join, which would silently
+        # re-widen the date range again if we filtered before that ran. Filtering once, last,
+        # after any upload has already happened, keeps the slider's bounds authoritative.
 
         st.header("Portfolios to compare")
         chosen = st.multiselect(
@@ -656,6 +740,11 @@ with st.sidebar:
             )
         else:
             sp_amount, sp_age = tax.FULL_NEW_STATE_PENSION_ANNUAL, tax.DEFAULT_STATE_PENSION_AGE
+
+# Historical data window filter - applied here (after the sidebar, incl. any asset-class upload in
+# tab_data) rather than inline where the slider is defined, so an upload's outer join can't silently
+# re-widen the date range the slider shows. Every chart/statistic below sees only this window.
+asset_df = asset_df[(asset_df.index.date >= window_start) & (asset_df.index.date <= window_end)]
 
 # Forward-looking CMA blend: recentre each asset class's mean monthly return, leaving volatility/
 # correlation/shape untouched (see src/cma.py). Applied ONCE here, before any simulation function
