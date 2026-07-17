@@ -534,15 +534,32 @@ with st.sidebar:
         # re-widen the date range again if we filtered before that ran. Filtering once, last,
         # after any upload has already happened, keeps the slider's bounds authoritative.
 
-        st.header("Portfolios to compare")
-        chosen = st.multiselect(
-            "Portfolios", list(PORTFOLIOS.keys()), default=["Four Seasons", "Better"],
-            format_func=display_name,
-            help="Drives the decumulation charts/statistics below and the 'Detailed analysis' section "
-                 "further down. Defaults to the decumulation comparison (Aspen Four Seasons vs Mobius "
-                 "Better) - the Accumulation section above always shows Aspen Original vs Mobius "
-                 "Alternative regardless of this selection.",
+        st.header("What to show")
+        view_mode = st.radio(
+            "Which comparison do you want to see?",
+            ["Both", "Accumulation only", "Decumulation only"],
+            help="Accumulation compares Aspen Original vs Mobius Alternative (growing the pot, no "
+                 "withdrawals). Decumulation compares Aspen Four Seasons vs Mobius Better (spending "
+                 "from the pot). Pick one if you only need a single scenario for this conversation - "
+                 "'Both' recomputes and shows everything, which takes a little longer.",
         )
+        show_accum = view_mode in ("Both", "Accumulation only")
+        show_decum = view_mode in ("Both", "Decumulation only")
+
+        st.header("Portfolios to compare")
+        if show_decum:
+            chosen = st.multiselect(
+                "Portfolios", list(PORTFOLIOS.keys()), default=["Four Seasons", "Better"],
+                format_func=display_name,
+                help="Drives the decumulation charts/statistics below and the 'Detailed analysis' section "
+                     "further down. Defaults to the decumulation comparison (Aspen Four Seasons vs Mobius "
+                     "Better) - the Accumulation section above always shows Aspen Original vs Mobius "
+                     "Alternative regardless of this selection.",
+            )
+        else:
+            chosen = []
+            st.caption("Not shown — set 'What to show' above to Decumulation or Both to compare "
+                       "Aspen Four Seasons vs Mobius Better.")
 
     with tab_data:
         with st.expander("📤 Add new asset-class return data"):
@@ -769,10 +786,11 @@ accum_profile_kwargs = dict(
     apply_tax=False, state_pension_annual=0.0, state_pension_age=int(sp_age),
 )
 accum_results = {}
-for name in ACCUM_NAMES:
-    profile = ClientProfile(**accum_profile_kwargs)
-    accum_results[name] = run_simulation(name, asset_df, cpi, profile, method=method, n_sims=n_sims,
-                                          block_mean=block_mean, seed=seed)
+if show_accum:
+    for name in ACCUM_NAMES:
+        profile = ClientProfile(**accum_profile_kwargs)
+        accum_results[name] = run_simulation(name, asset_df, cpi, profile, method=method, n_sims=n_sims,
+                                              block_mean=block_mean, seed=seed)
 
 profile_kwargs = dict(
     starting_age=age, horizon_years=horizon, starting_pot=float(pot), initial_annual_spend=float(spend),
@@ -791,97 +809,108 @@ for name in chosen:
 # above. Always Aspen Original vs Mobius Alternative, growing the pot with no withdrawals - matches
 # the previous Mobius model's own accumulation-style summary (compound return / volatility / prob of
 # ruin / cumulative performance chart), not the decumulation multiselect below.
-with hero_container:
-    render_comparison_section(
-        "Accumulation — Aspen Original vs Mobius Alternative",
-        "No withdrawals: growing the pot from today until the horizon ends. Probability of ruin is "
-        "included for consistency but is trivially ~0% here since nothing is being withdrawn - "
-        "volatility, annualised performance and cumulative performance are the metrics that matter "
-        "for this comparison.",
-        ACCUM_NAMES, accum_results, accum_profile_kwargs, asset_df, cpi,
-    )
+if show_accum:
+    with hero_container:
+        render_comparison_section(
+            "Accumulation — Aspen Original vs Mobius Alternative",
+            "No withdrawals: growing the pot from today until the horizon ends. Probability of ruin is "
+            "included for consistency but is trivially ~0% here since nothing is being withdrawn - "
+            "volatility, annualised performance and cumulative performance are the metrics that matter "
+            "for this comparison.",
+            ACCUM_NAMES, accum_results, accum_profile_kwargs, asset_df, cpi,
+        )
 
-    base_s = accum_results["Original"].summary()
-    alt_s = accum_results["Alternative"].summary()
-    legacy_gain = alt_s["Median legacy"] - base_s["Median legacy"]
-    fee_orig = weighted_avg_fee("Original") * 100
-    fee_alt = weighted_avg_fee("Alternative") * 100
-    legacy_phrase = (
-        f"**grows to £{legacy_gain:,.0f} more**" if legacy_gain > 0
-        else f"**grows to £{abs(legacy_gain):,.0f} less**"
-    )
-    st.success(
-        f"**Same underlying market exposure, lower cost** ({fee_orig:.2f}% → {fee_alt:.2f}% pa): over "
-        f"{horizon} years, Mobius Alternative {legacy_phrase} than Aspen Original, for holdings that "
-        "track essentially the same indices."
-    )
+        base_s = accum_results["Original"].summary()
+        alt_s = accum_results["Alternative"].summary()
+        legacy_gain = alt_s["Median legacy"] - base_s["Median legacy"]
+        fee_orig = weighted_avg_fee("Original") * 100
+        fee_alt = weighted_avg_fee("Alternative") * 100
+        legacy_phrase = (
+            f"**grows to £{legacy_gain:,.0f} more**" if legacy_gain > 0
+            else f"**grows to £{abs(legacy_gain):,.0f} less**"
+        )
+        st.success(
+            f"**Same underlying market exposure, lower cost** ({fee_orig:.2f}% → {fee_alt:.2f}% pa): over "
+            f"{horizon} years, Mobius Alternative {legacy_phrase} than Aspen Original, for holdings that "
+            "track essentially the same indices."
+        )
 
-    # Isolates cost alone: BOTH lines use Aspen's own asset-class weights (the shared "same index"
-    # exposure the FNZ data confirms), so the only variable that differs is the fee - a clean,
-    # deterministic (no simulation noise) illustration of what the cost difference alone is worth.
-    st.markdown("**What that cost difference alone is worth, left untouched**")
-    shared_weights = asset_class_weights("Original")
-    fee_orig_frac = weighted_avg_fee("Original")
-    fee_alt_frac = weighted_avg_fee("Alternative")
-    monthly_orig = weighted_monthly_returns(shared_weights, fee_orig_frac, asset_df,
-                                             label="fee_check_orig").dropna()
-    monthly_alt = weighted_monthly_returns(shared_weights, fee_alt_frac, asset_df,
-                                            label="fee_check_alt").dropna()
-    growth_orig = 1 + monthly_orig.mean()
-    growth_alt = 1 + monthly_alt.mean()
-    months = np.arange(horizon * 12 + 1)
-    val_orig = pot * growth_orig ** months
-    val_alt = pot * growth_alt ** months
-    years_axis = months / 12.0
-    fig_fee = go.Figure()
-    fig_fee.add_trace(go.Scatter(
-        x=years_axis, y=val_orig, name=display_name("Original"),
-        line=dict(color=portfolio_color("Original"), width=2, dash="dot"),
-    ))
-    fig_fee.add_trace(go.Scatter(
-        x=years_axis, y=val_alt, name=display_name("Alternative"), fill="tonexty",
-        fillcolor=_hex_to_rgba("#fab219", 0.20), line=dict(color=portfolio_color("Alternative"), width=3),
-    ))
-    fig_fee.update_layout(
-        xaxis_title="Year", yaxis_title="£", height=340,
-        margin=dict(l=10, r=10, t=10, b=10), legend=dict(orientation="h", y=-0.2),
-    )
-    st.plotly_chart(fig_fee, use_container_width=True)
-    fee_gap = val_alt[-1] - val_orig[-1]
-    st.caption(
-        f"Both lines hold the SAME asset-class exposure and the SAME average market growth "
-        f"({(growth_orig**12 - 1)*100:.2f}% pa gross assumption, held equal) - the only "
-        f"difference is Aspen's {fee_orig:.2f}% vs Mobius's {fee_alt:.2f}% pa charge. On a "
-        f"£{pot:,.0f} pot with no withdrawals, that alone is worth **£{fee_gap:,.0f}** after "
-        f"{horizon} years."
-    )
-    st.divider()
+        # Isolates cost alone: BOTH lines use Aspen's own asset-class weights (the shared "same index"
+        # exposure the FNZ data confirms), so the only variable that differs is the fee - a clean,
+        # deterministic (no simulation noise) illustration of what the cost difference alone is worth.
+        st.markdown("**What that cost difference alone is worth, left untouched**")
+        shared_weights = asset_class_weights("Original")
+        fee_orig_frac = weighted_avg_fee("Original")
+        fee_alt_frac = weighted_avg_fee("Alternative")
+        monthly_orig = weighted_monthly_returns(shared_weights, fee_orig_frac, asset_df,
+                                                 label="fee_check_orig").dropna()
+        monthly_alt = weighted_monthly_returns(shared_weights, fee_alt_frac, asset_df,
+                                                label="fee_check_alt").dropna()
+        growth_orig = 1 + monthly_orig.mean()
+        growth_alt = 1 + monthly_alt.mean()
+        months = np.arange(horizon * 12 + 1)
+        val_orig = pot * growth_orig ** months
+        val_alt = pot * growth_alt ** months
+        years_axis = months / 12.0
+        fig_fee = go.Figure()
+        fig_fee.add_trace(go.Scatter(
+            x=years_axis, y=val_orig, name=display_name("Original"),
+            line=dict(color=portfolio_color("Original"), width=2, dash="dot"),
+        ))
+        fig_fee.add_trace(go.Scatter(
+            x=years_axis, y=val_alt, name=display_name("Alternative"), fill="tonexty",
+            fillcolor=_hex_to_rgba("#fab219", 0.20), line=dict(color=portfolio_color("Alternative"), width=3),
+        ))
+        fig_fee.update_layout(
+            xaxis_title="Year", yaxis_title="£", height=340,
+            margin=dict(l=10, r=10, t=10, b=10), legend=dict(orientation="h", y=-0.2),
+        )
+        st.plotly_chart(fig_fee, use_container_width=True)
+        fee_gap = val_alt[-1] - val_orig[-1]
+        st.caption(
+            f"Both lines hold the SAME asset-class exposure and the SAME average market growth "
+            f"({(growth_orig**12 - 1)*100:.2f}% pa gross assumption, held equal) - the only "
+            f"difference is Aspen's {fee_orig:.2f}% vs Mobius's {fee_alt:.2f}% pa charge. On a "
+            f"£{pot:,.0f} pot with no withdrawals, that alone is worth **£{fee_gap:,.0f}** after "
+            f"{horizon} years."
+        )
+        st.divider()
 
 # Plain-English recap of the current scenario - so anyone opening this tool (not just the person who
 # set the sidebar controls) can see at a glance what's actually being compared, before wading into
-# the detailed statistics and charts below.
-_summary_bits = [
-    f"Comparing **{', '.join(display_name(n) for n in chosen) if chosen else 'no portfolios (pick some in the sidebar)'}** "
-    f"for a **{age}-year-old** with a **£{pot:,.0f}** pot, wanting **£{spend:,.0f}/year** "
-    f"({wr*100:.1f}% withdrawal rate) to last **{horizon} years**."
-]
-if guardrails:
-    _summary_bits.append("Spending guardrails are **ON** (cuts spend in weak markets, raises it in strong ones).")
-if apply_tax:
-    _summary_bits.append(
-        f"Tax + State Pension are **included** (the £{spend:,.0f} above is treated as take-home; "
-        f"State Pension starts at age {sp_age})."
-    )
-if cma_blend > 0:
-    _summary_bits.append(f"Returns are blended **{cma_blend_pct}%** toward forward-looking forecasts.")
-if use_mortality:
-    _summary_bits.append(
-        f"Mortality is **included** ({sex}{', joint life' if joint_life else ''}) — see the "
-        "mortality-adjusted figures further down for 'before death' outcomes."
-    )
-st.info(" ".join(_summary_bits))
+# the detailed statistics and charts below. Wording branches on view_mode since accumulation has no
+# spend/withdrawal-rate concept to recap.
+if show_decum:
+    _summary_bits = [
+        f"Comparing **{', '.join(display_name(n) for n in chosen) if chosen else 'no portfolios (pick some in the sidebar)'}** "
+        f"for a **{age}-year-old** with a **£{pot:,.0f}** pot, wanting **£{spend:,.0f}/year** "
+        f"({wr*100:.1f}% withdrawal rate) to last **{horizon} years**."
+    ]
+    if guardrails:
+        _summary_bits.append("Spending guardrails are **ON** (cuts spend in weak markets, raises it in strong ones).")
+    if apply_tax:
+        _summary_bits.append(
+            f"Tax + State Pension are **included** (the £{spend:,.0f} above is treated as take-home; "
+            f"State Pension starts at age {sp_age})."
+        )
+    if cma_blend > 0:
+        _summary_bits.append(f"Returns are blended **{cma_blend_pct}%** toward forward-looking forecasts.")
+    if use_mortality:
+        _summary_bits.append(
+            f"Mortality is **included** ({sex}{', joint life' if joint_life else ''}) — see the "
+            "mortality-adjusted figures further down for 'before death' outcomes."
+        )
+    st.info(" ".join(_summary_bits))
+elif show_accum:
+    _summary_bits = [
+        f"Comparing **Aspen Original** vs **Mobius Alternative** for a **{age}-year-old** growing a "
+        f"**£{pot:,.0f}** pot over **{horizon} years** (no withdrawals)."
+    ]
+    if cma_blend > 0:
+        _summary_bits.append(f"Returns are blended **{cma_blend_pct}%** toward forward-looking forecasts.")
+    st.info(" ".join(_summary_bits))
 
-if apply_tax:
+if apply_tax and show_decum:
     st.subheader("What tax and State Pension mean for this plan")
     gross_before_sp = tax.gross_up_pot_withdrawal(spend, other_taxable_income=0.0)
     tax_before_sp = tax.tax_due(gross_before_sp)
@@ -914,14 +943,20 @@ if apply_tax:
 
 if cma_blend > 0:
     st.subheader("What the forward-looking blend means for this plan")
-    st.info(
-        f"**In short: this plan is now being tested against more cautious return assumptions, not "
-        f"just the strong 2000-2026 stretch.** All the results below use returns pulled "
-        f"**{cma_blend_pct}%** of the way from actual history towards current analyst forecasts for "
-        "the next 10 years. Growth assets like equities and REITs are generally pulled DOWN (forecasters "
-        "expect more modest returns than that strong historical run), while some bonds are pulled UP. "
+    _cma_ruin_line = (
         "Expect the probability of ruin below to be somewhat HIGHER than at the 0% setting - that's "
         "the blend doing its job, not a bug: it's a fairer, less rose-tinted test of the plan."
+        if show_decum else
+        "Expect the growth figures above to be somewhat LOWER than at the 0% setting - that's the "
+        "blend doing its job, not a bug: it's a fairer, less rose-tinted test of the plan."
+    )
+    st.info(
+        f"**In short: this plan is now being tested against more cautious return assumptions, not "
+        f"just the strong 2000-2026 stretch.** All the results {'below' if show_decum else 'above'} use "
+        f"returns pulled **{cma_blend_pct}%** of the way from actual history towards current analyst "
+        "forecasts for the next 10 years. Growth assets like equities and REITs are generally pulled "
+        "DOWN (forecasters expect more modest returns than that strong historical run), while some "
+        f"bonds are pulled UP. {_cma_ruin_line}"
     )
     hist_annual, blended_annual = {}, {}
     for label, col in AC.items():
@@ -947,616 +982,643 @@ if cma_blend > 0:
         "JPMorgan, BlackRock and others), https://monevator.com/investment-return-forecasts/."
     )
 
-if results:
-    render_comparison_section(
-        "Decumulation — Aspen Four Seasons vs Mobius Better",
-        "With withdrawals: the client spends from this pot every year, so probability of ruin is the "
-        "headline risk metric here, alongside volatility, annualised performance and cumulative "
-        "performance.",
-        ordered_names(results), results, profile_kwargs, asset_df, cpi,
+st.subheader("What each portfolio holds")
+st.caption(
+    "Full underlying holdings for every portfolio currently in view, with each holding's asset-class "
+    "mapping and fee (OCF), plus the portfolio's overall weighted-average fee."
+)
+_holdings_names = []
+if show_accum:
+    _holdings_names += ACCUM_NAMES
+if show_decum:
+    _holdings_names += [n for n in ordered_names(chosen) if n not in _holdings_names]
+if _holdings_names:
+    _holdings_cols = st.columns(2) if len(_holdings_names) > 1 else [st.container()]
+    for _i, _name in enumerate(_holdings_names):
+        with _holdings_cols[_i % len(_holdings_cols)]:
+            st.markdown(f"**{display_name(_name)}** — weighted-average OCF: {weighted_avg_fee(_name)*100:.3f}% pa")
+            st.dataframe(portfolio_summary(_name), use_container_width=True)
+    st.caption(
+        "Fund-level returns are mapped to broad asset-class index returns (Bloomberg data, 1999/2000-"
+        "2026) for the simulation, since several individual fund return histories are too short for a "
+        "reliable long-run bootstrap. Holdings, weights and fees can be edited live in the sidebar's "
+        "'Edit data' tab."
     )
-    st.download_button(
-        "Download one-page summary (PDF)",
-        data=build_summary_pdf(accum_results, results, accum_profile_kwargs, profile_kwargs, asset_df,
-                                cpi, age, pot, spend, horizon, wr),
-        file_name="Mobius_Wealth_vs_Aspen_Advisers_summary.pdf",
-        mime="application/pdf",
-        help="A one-page takeaway covering both the Accumulation and Decumulation comparisons above - "
-             "hand it to the client or attach it to a follow-up email.",
-    )
-    st.divider()
-
-st.subheader("Headline statistics")
-summary_rows = []
-for name in ordered_names(results):
-    s = results[name].summary()
-    ci_lo, ci_hi = s.pop("Ruin prob 95% CI")
-    s["Ruin prob 95% CI"] = f"{ci_lo:.1%} - {ci_hi:.1%}"
-    s["Portfolio"] = display_name(name)
-    summary_rows.append(s)
-summary_df = pd.DataFrame(summary_rows).set_index("Portfolio")
-fmt = {
-    "Probability of ruin": "{:.1%}", "Ruin prob SE": "{:.2%}", "Median legacy": "£{:,.0f}",
-    "5th pctl legacy": "£{:,.0f}", "95th pctl legacy": "£{:,.0f}", "Avg shortfall years": "{:.2f}",
-    "% paths with any shortfall": "{:.1%}",
-}
-# defined at module level (not just inside `if use_mortality:`) since the annuitization comparison
-# section further down needs it too, and can run even when the main mortality toggle is off.
-mort_fmt = {
-    "Probability of ruin before death": "{:.1%}",
-    "Probability of surviving full horizon": "{:.1%}",
-    "Probability of ruin by horizon end (no mortality)": "{:.1%}",
-    "Median legacy at death": "£{:,.0f}",
-    "5th pctl legacy at death": "£{:,.0f}",
-    "95th pctl legacy at death": "£{:,.0f}",
-}
-st.dataframe(summary_df.style.format(fmt), use_container_width=True)
-st.caption(
-    f"Probability-of-ruin estimates are based on {n_sims:,} simulated paths per portfolio, so they "
-    f"carry sampling noise (shown as SE and a 95% CI above) - not a source of forecasting precision "
-    f"beyond what {n_sims:,} random draws can support. Increase 'Number of simulations' in the "
-    f"sidebar to tighten the interval; roughly 4x the sims halves the margin of error."
-)
-
-st.subheader("How the pot value could evolve over time")
-st.caption(
-    "All portfolios plotted together so they're directly comparable. The bold line is each "
-    "portfolio's median (typical) simulated outcome; the shaded band around it is the middle 50% "
-    "of simulated futures (the middle 90% is available in 'Detailed analysis' below for the wider "
-    "range)."
-)
-fig_overlay = go.Figure()
-for name in ordered_names(results):
-    res = results[name]
-    years = np.arange(res.profile.horizon_years + 1)
-    q25, q50, q75 = (np.percentile(res.paths, q, axis=0) for q in (25, 50, 75))
-    color = portfolio_color(name)
-    fig_overlay.add_trace(go.Scatter(x=years, y=q75, line=dict(width=0), showlegend=False,
-                                      hoverinfo="skip"))
-    fig_overlay.add_trace(go.Scatter(x=years, y=q25, fill="tonexty", line=dict(width=0),
-                                      showlegend=False, hoverinfo="skip",
-                                      fillcolor=_hex_to_rgba(color, 0.18)))
-    fig_overlay.add_trace(go.Scatter(x=years, y=q50, mode="lines", name=display_name(name),
-                                      line=dict(width=3, color=color)))
-fig_overlay.update_layout(
-    xaxis_title="Year", yaxis_title="Portfolio value (£)", height=440,
-    margin=dict(l=10, r=10, t=20, b=10), hovermode="x unified",
-    legend=dict(orientation="h", y=-0.15),
-)
-st.plotly_chart(fig_overlay, use_container_width=True)
-
-st.subheader("What might be left over at the end (the 'legacy')")
-st.caption(
-    "Each box shows the range of estate values left across all simulated futures for that portfolio - "
-    "the line in the middle of each box is the median, the box itself covers the middle 50% of "
-    "outcomes, and the whiskers/dots show how wide the full range can get, including the occasional "
-    "very high or very low result."
-)
-fig2 = go.Figure()
-for name in ordered_names(results):
-    res = results[name]
-    fig2.add_trace(go.Box(y=res.legacy, name=display_name(name), boxmean=True,
-                           marker_color=portfolio_color(name)))
-fig2.update_layout(yaxis_title="Estate at end of horizon (£)", height=400, showlegend=False)
-st.plotly_chart(fig2, use_container_width=True)
-
+else:
+    st.caption("Pick 'Both', 'Accumulation only' or 'Decumulation only' in the sidebar to see portfolio composition.")
 st.divider()
-show_detail = st.checkbox(
-    "Show detailed analysis (correlations, mortality, historical check, sensitivities, glide path, annuity, holdings)",
-    value=False,
-)
-if show_detail:
-    tab_corr, tab_mort, tab_hist, tab_sweep, tab_sens, tab_glide, tab_ann, tab_hold = st.tabs([
-        "Correlation", "Mortality", "Historical check", "Equity sweep", "Sensitivity",
-        "Glide path", "Annuity", "Holdings",
-    ])
-    with tab_corr:
-        st.subheader("How much do these investments actually move together?")
-        st.markdown(
-            "**In plain terms:** 'diversification' - spreading money across different investment types to "
-            "reduce risk - only really works between investments that DON'T move up and down together. This "
-            "heatmap shows how closely each pair of asset types has historically moved in the same direction: "
-            "**1.0 (dark red)** means they move almost perfectly together (little diversification benefit "
-            "between them); **0 (white)** means no relationship; **negative (dark blue)** means they tend to "
-            "move in opposite directions (the strongest diversification benefit)."
+
+if show_decum:
+    if results:
+        render_comparison_section(
+            "Decumulation — Aspen Four Seasons vs Mobius Better",
+            "With withdrawals: the client spends from this pot every year, so probability of ruin is the "
+            "headline risk metric here, alongside volatility, annualised performance and cumulative "
+            "performance.",
+            ordered_names(results), results, profile_kwargs, asset_df, cpi,
         )
-        st.caption(
-            "Based on monthly returns across the 11 broad asset classes over the full history (1999/2000-"
-            "2026). Notably, REITs and Infrastructure run ~0.75-0.76 correlated with Global Equities here, so "
-            "they add less true diversification than their labels might suggest (see the 'Better' portfolio "
-            "note in the Instructions/README)."
+        st.download_button(
+            "Download one-page summary (PDF)",
+            data=build_summary_pdf(accum_results, results, accum_profile_kwargs, profile_kwargs, asset_df,
+                                    cpi, age, pot, spend, horizon, wr),
+            file_name="Mobius_Wealth_vs_Aspen_Advisers_summary.pdf",
+            mime="application/pdf",
+            help="A one-page takeaway covering both the Accumulation and Decumulation comparisons above - "
+                 "hand it to the client or attach it to a follow-up email.",
         )
-        corr = asset_correlation_matrix(asset_df)
-        fig_corr = go.Figure(data=go.Heatmap(
-            z=corr.values, x=corr.columns.tolist(), y=corr.index.tolist(),
-            colorscale="RdBu", zmid=0, zmin=-1, zmax=1,
-            text=corr.round(2).values, texttemplate="%{text}", textfont=dict(size=10),
-            colorbar=dict(title="Correlation"),
-        ))
-        fig_corr.update_layout(height=500, margin=dict(l=10, r=10, t=10, b=10))
-        st.plotly_chart(fig_corr, use_container_width=True)
+        st.divider()
 
-    with tab_mort:
-        if use_mortality:
-            st.subheader("What the results look like factoring in life expectancy")
-            mortality_table = load_mortality_table()
-            qx_map = {"male": mortality_table["qx_male"], "female": mortality_table["qx_female"]}
+    st.subheader("Headline statistics")
+    summary_rows = []
+    for name in ordered_names(results):
+        s = results[name].summary()
+        ci_lo, ci_hi = s.pop("Ruin prob 95% CI")
+        s["Ruin prob 95% CI"] = f"{ci_lo:.1%} - {ci_hi:.1%}"
+        s["Portfolio"] = display_name(name)
+        summary_rows.append(s)
+    summary_df = pd.DataFrame(summary_rows).set_index("Portfolio")
+    fmt = {
+        "Probability of ruin": "{:.1%}", "Ruin prob SE": "{:.2%}", "Median legacy": "£{:,.0f}",
+        "5th pctl legacy": "£{:,.0f}", "95th pctl legacy": "£{:,.0f}", "Avg shortfall years": "{:.2f}",
+        "% paths with any shortfall": "{:.1%}",
+    }
+    # defined at module level (not just inside `if use_mortality:`) since the annuitization comparison
+    # section further down needs it too, and can run even when the main mortality toggle is off.
+    mort_fmt = {
+        "Probability of ruin before death": "{:.1%}",
+        "Probability of surviving full horizon": "{:.1%}",
+        "Probability of ruin by horizon end (no mortality)": "{:.1%}",
+        "Median legacy at death": "£{:,.0f}",
+        "5th pctl legacy at death": "£{:,.0f}",
+        "95th pctl legacy at death": "£{:,.0f}",
+    }
+    st.dataframe(summary_df.style.format(fmt), use_container_width=True)
+    st.caption(
+        f"Probability-of-ruin estimates are based on {n_sims:,} simulated paths per portfolio, so they "
+        f"carry sampling noise (shown as SE and a 95% CI above) - not a source of forecasting precision "
+        f"beyond what {n_sims:,} random draws can support. Increase 'Number of simulations' in the "
+        f"sidebar to tighten the interval; roughly 4x the sims halves the margin of error."
+    )
 
-            mortality_results = {}
-            for name in chosen:
-                mortality_results[name] = run_mortality_overlay(
-                    results[name], mortality_table, sex=sex,
-                    partner_age=partner_age if joint_life else None,
-                    partner_sex=partner_sex if joint_life else None,
-                )
+    st.subheader("How the pot value could evolve over time")
+    st.caption(
+        "All portfolios plotted together so they're directly comparable. The bold line is each "
+        "portfolio's median (typical) simulated outcome; the shaded band around it is the middle 50% "
+        "of simulated futures (the middle 90% is available in 'Detailed analysis' below for the wider "
+        "range)."
+    )
+    fig_overlay = go.Figure()
+    for name in ordered_names(results):
+        res = results[name]
+        years = np.arange(res.profile.horizon_years + 1)
+        q25, q50, q75 = (np.percentile(res.paths, q, axis=0) for q in (25, 50, 75))
+        color = portfolio_color(name)
+        fig_overlay.add_trace(go.Scatter(x=years, y=q75, line=dict(width=0), showlegend=False,
+                                          hoverinfo="skip"))
+        fig_overlay.add_trace(go.Scatter(x=years, y=q25, fill="tonexty", line=dict(width=0),
+                                          showlegend=False, hoverinfo="skip",
+                                          fillcolor=_hex_to_rgba(color, 0.18)))
+        fig_overlay.add_trace(go.Scatter(x=years, y=q50, mode="lines", name=display_name(name),
+                                          line=dict(width=3, color=color)))
+    fig_overlay.update_layout(
+        xaxis_title="Year", yaxis_title="Portfolio value (£)", height=440,
+        margin=dict(l=10, r=10, t=20, b=10), hovermode="x unified",
+        legend=dict(orientation="h", y=-0.15),
+    )
+    st.plotly_chart(fig_overlay, use_container_width=True)
 
-            life_basis_label = next(iter(mortality_results.values())).life_basis if mortality_results else ""
+    st.subheader("What might be left over at the end (the 'legacy')")
+    st.caption(
+        "Each box shows the range of estate values left across all simulated futures for that portfolio - "
+        "the line in the middle of each box is the median, the box itself covers the middle 50% of "
+        "outcomes, and the whiskers/dots show how wide the full range can get, including the occasional "
+        "very high or very low result."
+    )
+    fig2 = go.Figure()
+    for name in ordered_names(results):
+        res = results[name]
+        fig2.add_trace(go.Box(y=res.legacy, name=display_name(name), boxmean=True,
+                               marker_color=portfolio_color(name)))
+    fig2.update_layout(yaxis_title="Estate at end of horizon (£)", height=400, showlegend=False)
+    st.plotly_chart(fig2, use_container_width=True)
+
+    st.divider()
+    show_detail = st.checkbox(
+        "Show detailed analysis (correlations, mortality, historical check, sensitivities, glide path, annuity, holdings)",
+        value=False,
+    )
+    if show_detail:
+        tab_corr, tab_mort, tab_hist, tab_sweep, tab_sens, tab_glide, tab_ann, tab_hold = st.tabs([
+            "Correlation", "Mortality", "Historical check", "Equity sweep", "Sensitivity",
+            "Glide path", "Annuity", "Holdings",
+        ])
+        with tab_corr:
+            st.subheader("How much do these investments actually move together?")
             st.markdown(
-                f"**In plain terms:** based on **{life_basis_label}**, the figures below re-check each "
-                "already-simulated market future against realistic odds of the client being alive at each "
-                "age. 'Before death' outcomes are usually much better than the raw figures further up the "
-                "page, because a lot of 'runs out of money by year 30' paths only actually run out after the "
-                "client (or, for a couple, both partners) has already died - which isn't really a failure of "
-                "the plan."
+                "**In plain terms:** 'diversification' - spreading money across different investment types to "
+                "reduce risk - only really works between investments that DON'T move up and down together. This "
+                "heatmap shows how closely each pair of asset types has historically moved in the same direction: "
+                "**1.0 (dark red)** means they move almost perfectly together (little diversification benefit "
+                "between them); **0 (white)** means no relationship; **negative (dark blue)** means they tend to "
+                "move in opposite directions (the strongest diversification benefit)."
             )
-
-            col_surv, col_stats = st.columns([1, 1.4])
-
-            with col_surv:
-                st.markdown("**Odds of still being alive, year by year**")
-                years_axis = np.arange(horizon + 1)
-                fig_surv = go.Figure()
-                own_curve = survival_curve(qx_map[sex], age, horizon)
-                fig_surv.add_trace(go.Scatter(x=years_axis, y=own_curve, name=f"{sex.title()}, age {age}",
-                                               line=dict(width=2)))
-                if joint_life:
-                    partner_curve = survival_curve(qx_map[partner_sex], partner_age, horizon)
-                    fig_surv.add_trace(go.Scatter(x=years_axis, y=partner_curve,
-                                                   name=f"{partner_sex.title()}, age {partner_age}",
-                                                   line=dict(width=2, dash="dot")))
-                    if sex == "male":
-                        joint_curve = joint_survival_curve(qx_map["male"], qx_map["female"], age, partner_age, horizon)
-                    else:
-                        joint_curve = joint_survival_curve(qx_map["male"], qx_map["female"], partner_age, age, horizon)
-                    fig_surv.add_trace(go.Scatter(x=years_axis, y=joint_curve, name="Joint (at least one alive)",
-                                                   line=dict(width=3, color="#1f77b4")))
-                fig_surv.update_layout(xaxis_title="Year", yaxis_title="Probability alive", yaxis_range=[0, 1],
-                                        height=380, margin=dict(l=10, r=10, t=20, b=10),
-                                        legend=dict(orientation="h", y=-0.2))
-                st.plotly_chart(fig_surv, use_container_width=True)
-
-                le_own = life_expectancy(qx_map[sex], age)
-                le_text = f"Average life expectancy — {sex}, age {age}: **{le_own:.1f} more years**"
-                if joint_life:
-                    le_partner = life_expectancy(qx_map[partner_sex], partner_age)
-                    le_text += f"  \nPartner ({partner_sex}, age {partner_age}): **{le_partner:.1f} more years**"
-                st.markdown(le_text)
-                st.caption("An average, not a guarantee - about half of people this age will live longer, half less.")
-
-            with col_stats:
-                st.markdown("**Factoring in life expectancy vs. the raw figures above**")
-                mort_rows = []
-                for name in ordered_names(mortality_results):
-                    mr = mortality_results[name]
-                    s = mr.summary()
-                    s["Portfolio"] = display_name(name)
-                    del s["Life basis"]
-                    del s["N sims"]
-                    mort_rows.append(s)
-                mort_df = pd.DataFrame(mort_rows).set_index("Portfolio")
-                st.dataframe(mort_df.style.format(mort_fmt), use_container_width=True)
-                st.caption(
-                    "'Ruin before death' = the pot hits zero while the client (or, for joint life, at least "
-                    "one partner) is still alive — the outcome that actually matters, vs. the raw "
-                    "'horizon-end' ruin probability which penalises paths that only run out of money after "
-                    "everyone involved has already died. 'Legacy at death' values the estate at the client's "
-                    "own simulated death year rather than at a fixed year-30 cutoff."
-                )
-
-    with tab_hist:
-        st.subheader("What would have actually happened historically?")
-        st.caption(
-            "A reality check alongside the simulations above: instead of thousands of possible futures, this "
-            "replays the ONE sequence of returns that actually occurred, starting from the earliest available "
-            "date, so you can see one concrete real-world example rather than only statistical ranges."
-        )
-        hist_name = st.selectbox("Portfolio for historical check", chosen if chosen else list(PORTFOLIOS.keys()),
-                                  format_func=display_name)
-        hist_df = historical_single_path(hist_name, asset_df, cpi, ClientProfile(**profile_kwargs))
-        fig3 = go.Figure()
-        fig3.add_trace(go.Scatter(x=hist_df["Date"], y=hist_df["PortfolioValue"], mode="lines+markers", name="Portfolio value"))
-        fig3.update_layout(height=350, yaxis_title="£", margin=dict(l=10, r=10, t=10, b=10))
-        st.plotly_chart(fig3, use_container_width=True)
-
-    with tab_sweep:
-        st.subheader("How much should be in shares vs. safer assets?")
-        st.markdown(
-            "**In plain terms:** more in shares (equities) usually means higher potential growth but bigger "
-            "swings; more in bonds/cash usually means a smoother ride but less growth potential. This section "
-            "re-tests each portfolio at different overall share exposures, from cautious (20%) to all-in "
-            "(100%), to show that trade-off directly."
-        )
-        st.caption(
-            "Technical detail: rescales each chosen portfolio to hit a target TOTAL equity weight (Global "
-            "equities + EM equities combined), preserving the relative split within the equity sleeve and "
-            "within the rest of the portfolio, then re-runs the full simulation at each point."
-        )
-        run_sweep = st.checkbox(
-            "Test different share-vs-safer-assets mixes (re-runs each portfolio 9 times - slower)",
-            value=False,
-        )
-        if run_sweep and chosen:
-            sweep_n_sims = st.select_slider(
-                "Simulations per sweep point", [300, 500, 1000, 2000], value=500, key="sweep_n_sims",
-                help="Kept lower than the main simulation count by default since 9 points x N portfolios "
-                     "multiplies the total simulation work.",
+            st.caption(
+                "Based on monthly returns across the 11 broad asset classes over the full history (1999/2000-"
+                "2026). Notably, REITs and Infrastructure run ~0.75-0.76 correlated with Global Equities here, so "
+                "they add less true diversification than their labels might suggest (see the 'Better' portfolio "
+                "note in the Instructions/README)."
             )
-            equity_grid = np.arange(0.20, 1.01, 0.10)
-            sweep_results = {}
-            with st.spinner("Running equity sweep across all chosen portfolios..."):
+            corr = asset_correlation_matrix(asset_df)
+            fig_corr = go.Figure(data=go.Heatmap(
+                z=corr.values, x=corr.columns.tolist(), y=corr.index.tolist(),
+                colorscale="RdBu", zmid=0, zmin=-1, zmax=1,
+                text=corr.round(2).values, texttemplate="%{text}", textfont=dict(size=10),
+                colorbar=dict(title="Correlation"),
+            ))
+            fig_corr.update_layout(height=500, margin=dict(l=10, r=10, t=10, b=10))
+            st.plotly_chart(fig_corr, use_container_width=True)
+
+        with tab_mort:
+            if use_mortality:
+                st.subheader("What the results look like factoring in life expectancy")
+                mortality_table = load_mortality_table()
+                qx_map = {"male": mortality_table["qx_male"], "female": mortality_table["qx_female"]}
+
+                mortality_results = {}
                 for name in chosen:
-                    profile = ClientProfile(**profile_kwargs)
-                    sweep_results[name] = equity_sweep(
-                        name, asset_df, cpi, profile, equity_weights=equity_grid, method=method,
-                        n_sims=sweep_n_sims, seed=seed,
+                    mortality_results[name] = run_mortality_overlay(
+                        results[name], mortality_table, sex=sex,
+                        partner_age=partner_age if joint_life else None,
+                        partner_sex=partner_sex if joint_life else None,
                     )
 
-            sweep_col1, sweep_col2 = st.columns(2)
-            with sweep_col1:
-                fig4 = go.Figure()
-                for name, df_sweep in sweep_results.items():
-                    fig4.add_trace(go.Scatter(
-                        x=df_sweep.index * 100, y=df_sweep["Probability of ruin"] * 100,
-                        mode="lines+markers", name=display_name(name), line=dict(color=portfolio_color(name)),
-                    ))
-                fig4.update_layout(
-                    title="Probability of ruin vs total equity weight",
-                    xaxis_title="Total equity weight (%)", yaxis_title="Probability of ruin (%)",
-                    height=400, margin=dict(l=10, r=10, t=40, b=10),
+                life_basis_label = next(iter(mortality_results.values())).life_basis if mortality_results else ""
+                st.markdown(
+                    f"**In plain terms:** based on **{life_basis_label}**, the figures below re-check each "
+                    "already-simulated market future against realistic odds of the client being alive at each "
+                    "age. 'Before death' outcomes are usually much better than the raw figures further up the "
+                    "page, because a lot of 'runs out of money by year 30' paths only actually run out after the "
+                    "client (or, for a couple, both partners) has already died - which isn't really a failure of "
+                    "the plan."
                 )
-                st.plotly_chart(fig4, use_container_width=True)
-            with sweep_col2:
-                fig5 = go.Figure()
-                for name, df_sweep in sweep_results.items():
-                    fig5.add_trace(go.Scatter(
-                        x=df_sweep.index * 100, y=df_sweep["Median legacy"],
-                        mode="lines+markers", name=display_name(name), line=dict(color=portfolio_color(name)),
-                    ))
-                fig5.update_layout(
-                    title="Median legacy vs total equity weight",
-                    xaxis_title="Total equity weight (%)", yaxis_title="Median legacy (£)",
-                    height=400, margin=dict(l=10, r=10, t=40, b=10),
-                )
-                st.plotly_chart(fig5, use_container_width=True)
 
-            st.caption(
-                "Each point is an independent Monte Carlo run at that equity weight, so the lines carry their "
-                "own sampling noise (more so than the headline statistics above, since fewer sims are used per "
-                "point here) - read them as a trend across the grid rather than precise values at any one weight."
-            )
-            with st.expander("Equity sweep — full data"):
-                for name, df_sweep in sweep_results.items():
-                    st.markdown(f"**{display_name(name)}**")
-                    display_df = df_sweep.copy()
-                    display_df["Ruin prob 95% CI"] = display_df["Ruin prob 95% CI"].apply(
-                        lambda ci: f"{ci[0]:.1%} - {ci[1]:.1%}"
+                col_surv, col_stats = st.columns([1, 1.4])
+
+                with col_surv:
+                    st.markdown("**Odds of still being alive, year by year**")
+                    years_axis = np.arange(horizon + 1)
+                    fig_surv = go.Figure()
+                    own_curve = survival_curve(qx_map[sex], age, horizon)
+                    fig_surv.add_trace(go.Scatter(x=years_axis, y=own_curve, name=f"{sex.title()}, age {age}",
+                                                   line=dict(width=2)))
+                    if joint_life:
+                        partner_curve = survival_curve(qx_map[partner_sex], partner_age, horizon)
+                        fig_surv.add_trace(go.Scatter(x=years_axis, y=partner_curve,
+                                                       name=f"{partner_sex.title()}, age {partner_age}",
+                                                       line=dict(width=2, dash="dot")))
+                        if sex == "male":
+                            joint_curve = joint_survival_curve(qx_map["male"], qx_map["female"], age, partner_age, horizon)
+                        else:
+                            joint_curve = joint_survival_curve(qx_map["male"], qx_map["female"], partner_age, age, horizon)
+                        fig_surv.add_trace(go.Scatter(x=years_axis, y=joint_curve, name="Joint (at least one alive)",
+                                                       line=dict(width=3, color="#1f77b4")))
+                    fig_surv.update_layout(xaxis_title="Year", yaxis_title="Probability alive", yaxis_range=[0, 1],
+                                            height=380, margin=dict(l=10, r=10, t=20, b=10),
+                                            legend=dict(orientation="h", y=-0.2))
+                    st.plotly_chart(fig_surv, use_container_width=True)
+
+                    le_own = life_expectancy(qx_map[sex], age)
+                    le_text = f"Average life expectancy — {sex}, age {age}: **{le_own:.1f} more years**"
+                    if joint_life:
+                        le_partner = life_expectancy(qx_map[partner_sex], partner_age)
+                        le_text += f"  \nPartner ({partner_sex}, age {partner_age}): **{le_partner:.1f} more years**"
+                    st.markdown(le_text)
+                    st.caption("An average, not a guarantee - about half of people this age will live longer, half less.")
+
+                with col_stats:
+                    st.markdown("**Factoring in life expectancy vs. the raw figures above**")
+                    mort_rows = []
+                    for name in ordered_names(mortality_results):
+                        mr = mortality_results[name]
+                        s = mr.summary()
+                        s["Portfolio"] = display_name(name)
+                        del s["Life basis"]
+                        del s["N sims"]
+                        mort_rows.append(s)
+                    mort_df = pd.DataFrame(mort_rows).set_index("Portfolio")
+                    st.dataframe(mort_df.style.format(mort_fmt), use_container_width=True)
+                    st.caption(
+                        "'Ruin before death' = the pot hits zero while the client (or, for joint life, at least "
+                        "one partner) is still alive — the outcome that actually matters, vs. the raw "
+                        "'horizon-end' ruin probability which penalises paths that only run out of money after "
+                        "everyone involved has already died. 'Legacy at death' values the estate at the client's "
+                        "own simulated death year rather than at a fixed year-30 cutoff."
                     )
-                    st.dataframe(display_df.style.format(fmt), use_container_width=True)
 
-    with tab_sens:
-        st.subheader("Which decisions actually move the needle?")
-        st.markdown(
-            "**In plain terms:** this tests, one at a time, the two things a client and adviser can actually "
-            "control day-to-day - how much is spent, and (if guardrails are used) how sensitive the guardrails "
-            "are - to see how much each one changes the probability of ruin. The share-vs-safer-assets test "
-            "above covers the third lever; together they show which decisions matter most."
-        )
-        run_sensitivity = st.checkbox(
-            "Test how sensitive the plan is to spending level and guardrail settings (slower)",
-            value=False,
-        )
-        if run_sensitivity and chosen:
-            sens_n_sims = st.select_slider(
-                "Simulations per sensitivity point", [300, 500, 1000, 2000], value=500, key="sens_n_sims",
-            )
-            wr_tab, band_tab, heatmap_tab = st.tabs(["Spending level", "Guardrail sensitivity", "Spend x shares combined"])
-
-            with wr_tab:
-                st.caption(
-                    "Re-runs the plan at a range of yearly spending levels (as a % of the starting pot), in "
-                    "place of the sidebar's 'Desired annual spend' figure - guardrails apply as configured in "
-                    "the sidebar."
-                )
-                wr_grid = np.arange(0.02, 0.071, 0.005)
-                wr_results = {}
-                with st.spinner("Running withdrawal-rate sensitivity..."):
-                    for name in chosen:
-                        profile = ClientProfile(**profile_kwargs)
-                        wr_results[name] = sensitivity_withdrawal_rate(
-                            name, asset_df, cpi, profile, wr_grid=wr_grid, method=method,
-                            n_sims=sens_n_sims, seed=seed,
-                        )
-                fig6 = go.Figure()
-                for name, df_wr in wr_results.items():
-                    fig6.add_trace(go.Scatter(x=df_wr.index * 100, y=df_wr["Probability of ruin"] * 100,
-                                               mode="lines+markers", name=display_name(name),
-                                               line=dict(color=portfolio_color(name))))
-                fig6.update_layout(title="Probability of ruin vs withdrawal rate",
-                                    xaxis_title="Initial withdrawal rate (%)", yaxis_title="Probability of ruin (%)",
-                                    height=400, margin=dict(l=10, r=10, t=40, b=10))
-                st.plotly_chart(fig6, use_container_width=True)
-                with st.expander("Withdrawal-rate sensitivity — full data"):
-                    for name, df_wr in wr_results.items():
-                        st.markdown(f"**{display_name(name)}**")
-                        d = df_wr.copy()
-                        d["Ruin prob 95% CI"] = d["Ruin prob 95% CI"].apply(lambda ci: f"{ci[0]:.1%} - {ci[1]:.1%}")
-                        st.dataframe(d.style.format(fmt), use_container_width=True)
-
-            with band_tab:
-                st.caption(
-                    "Guardrails are forced ON here (regardless of the sidebar toggle) to isolate their own "
-                    "effect - a narrow band adjusts spending often (fewer plans run out of money, but more "
-                    "years with a spending cut); a wide band rarely adjusts (closer to spending exactly the "
-                    "same £ amount every year, adjusted only for inflation)."
-                )
-                band_grid = np.arange(0.05, 0.41, 0.05)
-                band_results = {}
-                with st.spinner("Running guardrail-band sensitivity..."):
-                    for name in chosen:
-                        profile = ClientProfile(**profile_kwargs)
-                        band_results[name] = sensitivity_guardrail_band(
-                            name, asset_df, cpi, profile, band_grid=band_grid, method=method,
-                            n_sims=sens_n_sims, seed=seed,
-                        )
-                band_col1, band_col2 = st.columns(2)
-                with band_col1:
-                    fig7 = go.Figure()
-                    for name, df_band in band_results.items():
-                        fig7.add_trace(go.Scatter(x=df_band.index * 100, y=df_band["Probability of ruin"] * 100,
-                                                   mode="lines+markers", name=display_name(name),
-                                                   line=dict(color=portfolio_color(name))))
-                    fig7.update_layout(title="Probability of ruin vs guardrail band",
-                                        xaxis_title="Guardrail band (± %)", yaxis_title="Probability of ruin (%)",
-                                        height=380, margin=dict(l=10, r=10, t=40, b=10))
-                    st.plotly_chart(fig7, use_container_width=True)
-                with band_col2:
-                    fig8 = go.Figure()
-                    for name, df_band in band_results.items():
-                        fig8.add_trace(go.Scatter(x=df_band.index * 100, y=df_band["Avg shortfall years"],
-                                                   mode="lines+markers", name=display_name(name),
-                                                   line=dict(color=portfolio_color(name))))
-                    fig8.update_layout(title="Avg shortfall years vs guardrail band",
-                                        xaxis_title="Guardrail band (± %)", yaxis_title="Avg years with a spend cut",
-                                        height=380, margin=dict(l=10, r=10, t=40, b=10))
-                    st.plotly_chart(fig8, use_container_width=True)
-                with st.expander("Guardrail-band sensitivity — full data"):
-                    for name, df_band in band_results.items():
-                        st.markdown(f"**{display_name(name)}**")
-                        d = df_band.copy()
-                        d["Ruin prob 95% CI"] = d["Ruin prob 95% CI"].apply(lambda ci: f"{ci[0]:.1%} - {ci[1]:.1%}")
-                        st.dataframe(d.style.format(fmt), use_container_width=True)
-
-            with heatmap_tab:
-                st.caption(
-                    "Combines spending level and share-vs-safer-assets mix into one grid, for a single "
-                    "portfolio, so you can see how they interact - a spending level that's fine at one share "
-                    "exposure can be unsustainable at another, and vice versa."
-                )
-                heatmap_portfolio = st.selectbox("Portfolio", chosen, key="heatmap_portfolio", format_func=display_name)
-                heatmap_metric = st.radio(
-                    "Metric", ["Probability of ruin", "% paths with any shortfall"], horizontal=True,
-                    key="heatmap_metric",
-                )
-                wr_grid_hm = np.arange(0.02, 0.071, 0.01)
-                eq_grid_hm = np.arange(0.20, 1.01, 0.20)
-                with st.spinner("Running shortfall heatmap..."):
-                    hm_df = shortfall_heatmap(
-                        heatmap_portfolio, asset_df, cpi, ClientProfile(**profile_kwargs),
-                        wr_grid=wr_grid_hm, equity_weights=eq_grid_hm,
-                        metric="prob_ruin" if heatmap_metric == "Probability of ruin" else "shortfall_pct",
-                        method=method, n_sims=sens_n_sims, seed=seed,
-                    )
-                fig10 = go.Figure(data=go.Heatmap(
-                    z=hm_df.values * 100,
-                    x=[f"{c:.0%}" for c in hm_df.columns], y=[f"{r:.1%}" for r in hm_df.index],
-                    colorscale="Reds", text=(hm_df.values * 100).round(1), texttemplate="%{text}%",
-                    colorbar=dict(title=f"{heatmap_metric} (%)"),
-                ))
-                fig10.update_layout(
-                    title=f"{heatmap_metric} — {display_name(heatmap_portfolio)}",
-                    xaxis_title="Total equity weight", yaxis_title="Withdrawal rate",
-                    height=450, margin=dict(l=10, r=10, t=40, b=10),
-                )
-                st.plotly_chart(fig10, use_container_width=True)
-                with st.expander("Shortfall heatmap — full data"):
-                    st.dataframe(hm_df.style.format("{:.1%}"), use_container_width=True)
-
-    with tab_glide:
-        st.subheader("Should the share exposure reduce as the client ages?")
-        st.markdown(
-            "**In plain terms:** many advisers gradually shift a portfolio from more shares to more safer "
-            "assets as a client gets older ('de-risking'), rather than keeping the mix fixed for 30 years. "
-            "This compares a fixed mix held throughout against one that glides smoothly from a starting share "
-            "exposure down to a lower ending one."
-        )
-        run_glide = st.checkbox("Compare a fixed mix vs. gradually de-risking with age (slower)", value=False)
-        if run_glide and chosen:
-            glide_portfolio = st.selectbox("Portfolio", chosen, key="glide_portfolio", format_func=display_name)
-            glide_col1, glide_col2, glide_col3 = st.columns(3)
-            with glide_col1:
-                glide_start = st.slider("Starting share exposure", 0.20, 1.00, 0.70, step=0.05, key="glide_start")
-            with glide_col2:
-                glide_end = st.slider("Ending share exposure", 0.20, 1.00, 0.40, step=0.05, key="glide_end")
-            with glide_col3:
-                glide_n_sims = st.select_slider("Simulations", [300, 500, 1000, 2000], value=1000, key="glide_n_sims")
-            glide_method = method if method in ("iid", "fixed_block", "stationary_block") else "stationary_block"
-            if glide_method != method:
-                st.caption("The 'extreme/crash years' simulation approach isn't supported for this comparison - "
-                           "using 'Realistic historical patterns' instead just for this section.")
-
-            with st.spinner("Running glide path comparison..."):
-                profile = ClientProfile(**profile_kwargs)
-                # fixed-weight comparison at the STARTING equity weight, held constant for the whole horizon
-                from portfolios import scale_to_equity_weight, weighted_avg_fee as _wfee
-                fixed_weights = scale_to_equity_weight(glide_portfolio, glide_start)
-                fixed_fee = _wfee(glide_portfolio)
-                fixed_res = run_simulation(
-                    glide_portfolio, asset_df, cpi, profile, method=glide_method, n_sims=glide_n_sims,
-                    seed=seed, custom_weights=fixed_weights, custom_fee=fixed_fee,
-                )
-                glide_res = run_glide_path_simulation(
-                    glide_portfolio, asset_df, cpi, profile, start_equity_weight=glide_start,
-                    end_equity_weight=glide_end, method=glide_method, n_sims=glide_n_sims, seed=seed,
-                )
-
-            glide_summary = pd.DataFrame([
-                {**fixed_res.summary(), "Strategy": f"Fixed at {glide_start:.0%} equity"},
-                {**glide_res.summary(), "Strategy": f"Glide {glide_start:.0%} → {glide_end:.0%} equity"},
-            ]).set_index("Strategy")
-            ci_col = glide_summary.pop("Ruin prob 95% CI")
-            glide_summary["Ruin prob 95% CI"] = ci_col.apply(lambda ci: f"{ci[0]:.1%} - {ci[1]:.1%}")
-            st.dataframe(glide_summary.style.format(fmt), use_container_width=True)
-
-            fig9 = go.Figure()
-            for label, res in [(f"Fixed {glide_start:.0%}", fixed_res), (f"Glide {glide_start:.0%}→{glide_end:.0%}", glide_res)]:
-                median_path = np.median(res.paths, axis=0)
-                fig9.add_trace(go.Scatter(x=np.arange(len(median_path)), y=median_path, mode="lines", name=label))
-            fig9.update_layout(title="Median portfolio value over time: fixed vs glide path",
-                                xaxis_title="Year", yaxis_title="Portfolio value (£)", height=400,
-                                margin=dict(l=10, r=10, t=40, b=10))
-            st.plotly_chart(fig9, use_container_width=True)
-
-    with tab_ann:
-        st.subheader("Should part of the pot be swapped for a guaranteed income?")
-        st.markdown(
-            "**In plain terms:** an annuity means handing over part of the pot, once, in exchange for an "
-            "income that's paid for as long as the client lives, no matter how long that is or what happens "
-            "to the stock market. This section compares 'give up X% of the pot for guaranteed income' against "
-            "'leave the whole pot invested and draw from it'."
-        )
-        st.caption(
-            "Uses real, dated UK best-buy annuity rates (see src/annuity.py for sources) and the same "
-            "survival-odds table as the mortality section above, so the comparison shows 'before death' "
-            "outcomes rather than just the raw horizon-end ruin probability."
-        )
-        run_annuity = st.checkbox("Compare annuitizing part of the pot vs. staying fully invested (slower)", value=False)
-        if run_annuity and chosen:
-            from annuity import annuitize, annuity_rate, MIN_QUOTED_AGE, MAX_QUOTED_AGE
-
-            ann_col1, ann_col2, ann_col3, ann_col4 = st.columns(4)
-            with ann_col1:
-                annuity_portfolio = st.selectbox("Portfolio", chosen, key="annuity_portfolio", format_func=display_name)
-            with ann_col2:
-                annuity_pct = st.slider("% of the pot to swap for guaranteed income", 0, 100, 30, step=5,
-                                         key="annuity_pct_slider") / 100.0
-            with ann_col3:
-                annuity_joint_default = bool(use_mortality and joint_life)
-                annuity_joint = st.checkbox(
-                    "Keep paying a partner after the client dies (at a lower rate)", value=annuity_joint_default,
-                    key="annuity_joint",
-                    help="Technical name: joint life, 50% to survivor. Costs more per £ of guaranteed income "
-                         "than a single-life annuity, since it's expected to pay out for longer.",
-                )
-            with ann_col4:
-                ann_n_sims = st.select_slider("Simulations", [500, 1000, 2000, 3000], value=2000, key="ann_n_sims")
-
-            if age < MIN_QUOTED_AGE or age > MAX_QUOTED_AGE:
-                st.caption(
-                    f"Note: the quoted annuity-rate sources only cover ages {MIN_QUOTED_AGE}-{MAX_QUOTED_AGE} "
-                    f"- using the age-{MIN_QUOTED_AGE if age < MIN_QUOTED_AGE else MAX_QUOTED_AGE} rate as a "
-                    f"conservative proxy for age {age} rather than an unsourced extrapolation."
-                )
-
-            base_profile = ClientProfile(**profile_kwargs)
-            annuitized_profile, ann_rate, annuity_income = annuitize(
-                base_profile, annuity_pct, age, joint=annuity_joint
-            )
-            st.info(
-                f"Annuitizing **{annuity_pct:.0%}** of the £{pot:,.0f} pot at age {age} "
-                f"({'joint life' if annuity_joint else 'single life'}) buys a guaranteed "
-                f"**£{annuity_income:,.0f}/year for life**, at today's rate of {ann_rate:.2%}. This income is "
-                "LEVEL - it does NOT rise with inflation, unlike everything else in this plan, so its real "
-                "purchasing power falls over time (roughly halving after ~20 years at ~3% inflation). It "
-                f"leaves **£{annuitized_profile.starting_pot:,.0f}** in drawdown alongside the guaranteed income."
-            )
-
-            with st.spinner("Running annuitization comparison..."):
-                res_drawdown = run_simulation(annuity_portfolio, asset_df, cpi, base_profile, method=method,
-                                               n_sims=ann_n_sims, block_mean=block_mean, seed=seed)
-                res_annuitized = run_simulation(annuity_portfolio, asset_df, cpi, annuitized_profile, method=method,
-                                                 n_sims=ann_n_sims, block_mean=block_mean, seed=seed)
-
-            ann_summary = pd.DataFrame([
-                {**res_drawdown.summary(), "Strategy": "100% drawdown"},
-                {**res_annuitized.summary(), "Strategy": f"{annuity_pct:.0%} annuitized"},
-            ]).set_index("Strategy")
-            ann_ci = ann_summary.pop("Ruin prob 95% CI")
-            ann_summary["Ruin prob 95% CI"] = ann_ci.apply(lambda ci: f"{ci[0]:.1%} - {ci[1]:.1%}")
-            st.dataframe(ann_summary.style.format(fmt), use_container_width=True)
-
-            st.markdown("**Mortality-adjusted comparison**")
-            ann_sex = sex if use_mortality else st.selectbox(
-                "Sex (for mortality-adjusted outcomes)", ["male", "female"], format_func=str.title,
-                key="annuity_sex",
-            )
-            ann_partner_age = partner_age if (use_mortality and joint_life) else (age - 2)
-            ann_partner_sex = partner_sex if (use_mortality and joint_life) else ("female" if ann_sex == "male" else "male")
-            mortality_table_ann = load_mortality_table()
-            mr_drawdown = run_mortality_overlay(
-                res_drawdown, mortality_table_ann, sex=ann_sex,
-                partner_age=ann_partner_age if annuity_joint else None,
-                partner_sex=ann_partner_sex if annuity_joint else None,
-            )
-            mr_annuitized = run_mortality_overlay(
-                res_annuitized, mortality_table_ann, sex=ann_sex,
-                partner_age=ann_partner_age if annuity_joint else None,
-                partner_sex=ann_partner_sex if annuity_joint else None,
-            )
-            mort_ann_rows = []
-            for label, mr in [("100% drawdown", mr_drawdown), (f"{annuity_pct:.0%} annuitized", mr_annuitized)]:
-                s = mr.summary()
-                s["Strategy"] = label
-                del s["Life basis"], s["N sims"]
-                mort_ann_rows.append(s)
-            mort_ann_df = pd.DataFrame(mort_ann_rows).set_index("Strategy")
-            st.dataframe(mort_ann_df.style.format(mort_fmt), use_container_width=True)
+        with tab_hist:
+            st.subheader("What would have actually happened historically?")
             st.caption(
-                f"Life basis: **{mr_drawdown.life_basis}**. 'Ruin before death' is the outcome that actually "
-                "matters for the client - the pot running out while they (or their partner) are still alive - "
-                "as opposed to the raw horizon-end figure above, which also counts paths that only run dry "
-                "after everyone involved has already died."
+                "A reality check alongside the simulations above: instead of thousands of possible futures, this "
+                "replays the ONE sequence of returns that actually occurred, starting from the earliest available "
+                "date, so you can see one concrete real-world example rather than only statistical ranges."
             )
+            hist_name = st.selectbox("Portfolio for historical check", chosen if chosen else list(PORTFOLIOS.keys()),
+                                      format_func=display_name)
+            hist_df = historical_single_path(hist_name, asset_df, cpi, ClientProfile(**profile_kwargs))
+            fig3 = go.Figure()
+            fig3.add_trace(go.Scatter(x=hist_df["Date"], y=hist_df["PortfolioValue"], mode="lines+markers", name="Portfolio value"))
+            fig3.update_layout(height=350, yaxis_title="£", margin=dict(l=10, r=10, t=10, b=10))
+            st.plotly_chart(fig3, use_container_width=True)
 
-            fig_ann = go.Figure()
-            for label, res in [("100% drawdown", res_drawdown), (f"{annuity_pct:.0%} annuitized", res_annuitized)]:
-                median_path = np.median(res.paths, axis=0)
-                fig_ann.add_trace(go.Scatter(x=np.arange(len(median_path)), y=median_path, mode="lines", name=label))
-            fig_ann.update_layout(
-                title="Median pot value over time: drawdown vs annuitized (annuity income paid separately, not shown)",
-                xaxis_title="Year", yaxis_title="Pot value (£)", height=400,
-                margin=dict(l=10, r=10, t=40, b=10),
-            )
-            st.plotly_chart(fig_ann, use_container_width=True)
-            st.caption(
-                "Annuitizing shrinks the pot immediately (money moves out to buy the annuity) but replaces "
-                "part of the withdrawal need with guaranteed income for life, which is why probability of "
-                "ruin normally falls even though the pot chart above looks smaller throughout. Rates used: "
-                "single-life, LEVEL income (doesn't rise with inflation), no minimum payment period, per "
-                "published Hargreaves Lansdown best-buy data (14-28 May 2026, see src/annuity.py) - a "
-                "simplification. It doesn't model taking a 25% tax-free lump sum first (PCLS), a minimum "
-                "guaranteed payment period, and the joint-life (paying a partner too) discount uses one "
-                "age-65 data point applied at every age. Real quotes vary by provider, postcode and health, "
-                "and should always be checked with an actual quote before a client acts on this."
-            )
-
-    with tab_hold:
-        with st.expander("Portfolio holdings & assumptions"):
-            for name in ordered_names(chosen):
-                st.markdown(f"**{display_name(name)}** — weighted-average OCF: {weighted_avg_fee(name)*100:.3f}% pa")
-                st.dataframe(portfolio_summary(name), use_container_width=True)
+        with tab_sweep:
+            st.subheader("How much should be in shares vs. safer assets?")
             st.markdown(
-                "Fund-level returns are mapped to broad asset-class index returns (Bloomberg data, "
-                "1999/2000–2026) for the simulation, since several individual fund return histories are "
-                "too short for a reliable long-run bootstrap. See `src/portfolios.py` for the full mapping "
-                "and fee assumptions."
+                "**In plain terms:** more in shares (equities) usually means higher potential growth but bigger "
+                "swings; more in bonds/cash usually means a smoother ride but less growth potential. This section "
+                "re-tests each portfolio at different overall share exposures, from cautious (20%) to all-in "
+                "(100%), to show that trade-off directly."
             )
+            st.caption(
+                "Technical detail: rescales each chosen portfolio to hit a target TOTAL equity weight (Global "
+                "equities + EM equities combined), preserving the relative split within the equity sleeve and "
+                "within the rest of the portfolio, then re-runs the full simulation at each point."
+            )
+            run_sweep = st.checkbox(
+                "Test different share-vs-safer-assets mixes (re-runs each portfolio 9 times - slower)",
+                value=False,
+            )
+            if run_sweep and chosen:
+                sweep_n_sims = st.select_slider(
+                    "Simulations per sweep point", [300, 500, 1000, 2000], value=500, key="sweep_n_sims",
+                    help="Kept lower than the main simulation count by default since 9 points x N portfolios "
+                         "multiplies the total simulation work.",
+                )
+                equity_grid = np.arange(0.20, 1.01, 0.10)
+                sweep_results = {}
+                with st.spinner("Running equity sweep across all chosen portfolios..."):
+                    for name in chosen:
+                        profile = ClientProfile(**profile_kwargs)
+                        sweep_results[name] = equity_sweep(
+                            name, asset_df, cpi, profile, equity_weights=equity_grid, method=method,
+                            n_sims=sweep_n_sims, seed=seed,
+                        )
+
+                sweep_col1, sweep_col2 = st.columns(2)
+                with sweep_col1:
+                    fig4 = go.Figure()
+                    for name, df_sweep in sweep_results.items():
+                        fig4.add_trace(go.Scatter(
+                            x=df_sweep.index * 100, y=df_sweep["Probability of ruin"] * 100,
+                            mode="lines+markers", name=display_name(name), line=dict(color=portfolio_color(name)),
+                        ))
+                    fig4.update_layout(
+                        title="Probability of ruin vs total equity weight",
+                        xaxis_title="Total equity weight (%)", yaxis_title="Probability of ruin (%)",
+                        height=400, margin=dict(l=10, r=10, t=40, b=10),
+                    )
+                    st.plotly_chart(fig4, use_container_width=True)
+                with sweep_col2:
+                    fig5 = go.Figure()
+                    for name, df_sweep in sweep_results.items():
+                        fig5.add_trace(go.Scatter(
+                            x=df_sweep.index * 100, y=df_sweep["Median legacy"],
+                            mode="lines+markers", name=display_name(name), line=dict(color=portfolio_color(name)),
+                        ))
+                    fig5.update_layout(
+                        title="Median legacy vs total equity weight",
+                        xaxis_title="Total equity weight (%)", yaxis_title="Median legacy (£)",
+                        height=400, margin=dict(l=10, r=10, t=40, b=10),
+                    )
+                    st.plotly_chart(fig5, use_container_width=True)
+
+                st.caption(
+                    "Each point is an independent Monte Carlo run at that equity weight, so the lines carry their "
+                    "own sampling noise (more so than the headline statistics above, since fewer sims are used per "
+                    "point here) - read them as a trend across the grid rather than precise values at any one weight."
+                )
+                with st.expander("Equity sweep — full data"):
+                    for name, df_sweep in sweep_results.items():
+                        st.markdown(f"**{display_name(name)}**")
+                        display_df = df_sweep.copy()
+                        display_df["Ruin prob 95% CI"] = display_df["Ruin prob 95% CI"].apply(
+                            lambda ci: f"{ci[0]:.1%} - {ci[1]:.1%}"
+                        )
+                        st.dataframe(display_df.style.format(fmt), use_container_width=True)
+
+        with tab_sens:
+            st.subheader("Which decisions actually move the needle?")
+            st.markdown(
+                "**In plain terms:** this tests, one at a time, the two things a client and adviser can actually "
+                "control day-to-day - how much is spent, and (if guardrails are used) how sensitive the guardrails "
+                "are - to see how much each one changes the probability of ruin. The share-vs-safer-assets test "
+                "above covers the third lever; together they show which decisions matter most."
+            )
+            run_sensitivity = st.checkbox(
+                "Test how sensitive the plan is to spending level and guardrail settings (slower)",
+                value=False,
+            )
+            if run_sensitivity and chosen:
+                sens_n_sims = st.select_slider(
+                    "Simulations per sensitivity point", [300, 500, 1000, 2000], value=500, key="sens_n_sims",
+                )
+                wr_tab, band_tab, heatmap_tab = st.tabs(["Spending level", "Guardrail sensitivity", "Spend x shares combined"])
+
+                with wr_tab:
+                    st.caption(
+                        "Re-runs the plan at a range of yearly spending levels (as a % of the starting pot), in "
+                        "place of the sidebar's 'Desired annual spend' figure - guardrails apply as configured in "
+                        "the sidebar."
+                    )
+                    wr_grid = np.arange(0.02, 0.071, 0.005)
+                    wr_results = {}
+                    with st.spinner("Running withdrawal-rate sensitivity..."):
+                        for name in chosen:
+                            profile = ClientProfile(**profile_kwargs)
+                            wr_results[name] = sensitivity_withdrawal_rate(
+                                name, asset_df, cpi, profile, wr_grid=wr_grid, method=method,
+                                n_sims=sens_n_sims, seed=seed,
+                            )
+                    fig6 = go.Figure()
+                    for name, df_wr in wr_results.items():
+                        fig6.add_trace(go.Scatter(x=df_wr.index * 100, y=df_wr["Probability of ruin"] * 100,
+                                                   mode="lines+markers", name=display_name(name),
+                                                   line=dict(color=portfolio_color(name))))
+                    fig6.update_layout(title="Probability of ruin vs withdrawal rate",
+                                        xaxis_title="Initial withdrawal rate (%)", yaxis_title="Probability of ruin (%)",
+                                        height=400, margin=dict(l=10, r=10, t=40, b=10))
+                    st.plotly_chart(fig6, use_container_width=True)
+                    with st.expander("Withdrawal-rate sensitivity — full data"):
+                        for name, df_wr in wr_results.items():
+                            st.markdown(f"**{display_name(name)}**")
+                            d = df_wr.copy()
+                            d["Ruin prob 95% CI"] = d["Ruin prob 95% CI"].apply(lambda ci: f"{ci[0]:.1%} - {ci[1]:.1%}")
+                            st.dataframe(d.style.format(fmt), use_container_width=True)
+
+                with band_tab:
+                    st.caption(
+                        "Guardrails are forced ON here (regardless of the sidebar toggle) to isolate their own "
+                        "effect - a narrow band adjusts spending often (fewer plans run out of money, but more "
+                        "years with a spending cut); a wide band rarely adjusts (closer to spending exactly the "
+                        "same £ amount every year, adjusted only for inflation)."
+                    )
+                    band_grid = np.arange(0.05, 0.41, 0.05)
+                    band_results = {}
+                    with st.spinner("Running guardrail-band sensitivity..."):
+                        for name in chosen:
+                            profile = ClientProfile(**profile_kwargs)
+                            band_results[name] = sensitivity_guardrail_band(
+                                name, asset_df, cpi, profile, band_grid=band_grid, method=method,
+                                n_sims=sens_n_sims, seed=seed,
+                            )
+                    band_col1, band_col2 = st.columns(2)
+                    with band_col1:
+                        fig7 = go.Figure()
+                        for name, df_band in band_results.items():
+                            fig7.add_trace(go.Scatter(x=df_band.index * 100, y=df_band["Probability of ruin"] * 100,
+                                                       mode="lines+markers", name=display_name(name),
+                                                       line=dict(color=portfolio_color(name))))
+                        fig7.update_layout(title="Probability of ruin vs guardrail band",
+                                            xaxis_title="Guardrail band (± %)", yaxis_title="Probability of ruin (%)",
+                                            height=380, margin=dict(l=10, r=10, t=40, b=10))
+                        st.plotly_chart(fig7, use_container_width=True)
+                    with band_col2:
+                        fig8 = go.Figure()
+                        for name, df_band in band_results.items():
+                            fig8.add_trace(go.Scatter(x=df_band.index * 100, y=df_band["Avg shortfall years"],
+                                                       mode="lines+markers", name=display_name(name),
+                                                       line=dict(color=portfolio_color(name))))
+                        fig8.update_layout(title="Avg shortfall years vs guardrail band",
+                                            xaxis_title="Guardrail band (± %)", yaxis_title="Avg years with a spend cut",
+                                            height=380, margin=dict(l=10, r=10, t=40, b=10))
+                        st.plotly_chart(fig8, use_container_width=True)
+                    with st.expander("Guardrail-band sensitivity — full data"):
+                        for name, df_band in band_results.items():
+                            st.markdown(f"**{display_name(name)}**")
+                            d = df_band.copy()
+                            d["Ruin prob 95% CI"] = d["Ruin prob 95% CI"].apply(lambda ci: f"{ci[0]:.1%} - {ci[1]:.1%}")
+                            st.dataframe(d.style.format(fmt), use_container_width=True)
+
+                with heatmap_tab:
+                    st.caption(
+                        "Combines spending level and share-vs-safer-assets mix into one grid, for a single "
+                        "portfolio, so you can see how they interact - a spending level that's fine at one share "
+                        "exposure can be unsustainable at another, and vice versa."
+                    )
+                    heatmap_portfolio = st.selectbox("Portfolio", chosen, key="heatmap_portfolio", format_func=display_name)
+                    heatmap_metric = st.radio(
+                        "Metric", ["Probability of ruin", "% paths with any shortfall"], horizontal=True,
+                        key="heatmap_metric",
+                    )
+                    wr_grid_hm = np.arange(0.02, 0.071, 0.01)
+                    eq_grid_hm = np.arange(0.20, 1.01, 0.20)
+                    with st.spinner("Running shortfall heatmap..."):
+                        hm_df = shortfall_heatmap(
+                            heatmap_portfolio, asset_df, cpi, ClientProfile(**profile_kwargs),
+                            wr_grid=wr_grid_hm, equity_weights=eq_grid_hm,
+                            metric="prob_ruin" if heatmap_metric == "Probability of ruin" else "shortfall_pct",
+                            method=method, n_sims=sens_n_sims, seed=seed,
+                        )
+                    fig10 = go.Figure(data=go.Heatmap(
+                        z=hm_df.values * 100,
+                        x=[f"{c:.0%}" for c in hm_df.columns], y=[f"{r:.1%}" for r in hm_df.index],
+                        colorscale="Reds", text=(hm_df.values * 100).round(1), texttemplate="%{text}%",
+                        colorbar=dict(title=f"{heatmap_metric} (%)"),
+                    ))
+                    fig10.update_layout(
+                        title=f"{heatmap_metric} — {display_name(heatmap_portfolio)}",
+                        xaxis_title="Total equity weight", yaxis_title="Withdrawal rate",
+                        height=450, margin=dict(l=10, r=10, t=40, b=10),
+                    )
+                    st.plotly_chart(fig10, use_container_width=True)
+                    with st.expander("Shortfall heatmap — full data"):
+                        st.dataframe(hm_df.style.format("{:.1%}"), use_container_width=True)
+
+        with tab_glide:
+            st.subheader("Should the share exposure reduce as the client ages?")
+            st.markdown(
+                "**In plain terms:** many advisers gradually shift a portfolio from more shares to more safer "
+                "assets as a client gets older ('de-risking'), rather than keeping the mix fixed for 30 years. "
+                "This compares a fixed mix held throughout against one that glides smoothly from a starting share "
+                "exposure down to a lower ending one."
+            )
+            run_glide = st.checkbox("Compare a fixed mix vs. gradually de-risking with age (slower)", value=False)
+            if run_glide and chosen:
+                glide_portfolio = st.selectbox("Portfolio", chosen, key="glide_portfolio", format_func=display_name)
+                glide_col1, glide_col2, glide_col3 = st.columns(3)
+                with glide_col1:
+                    glide_start = st.slider("Starting share exposure", 0.20, 1.00, 0.70, step=0.05, key="glide_start")
+                with glide_col2:
+                    glide_end = st.slider("Ending share exposure", 0.20, 1.00, 0.40, step=0.05, key="glide_end")
+                with glide_col3:
+                    glide_n_sims = st.select_slider("Simulations", [300, 500, 1000, 2000], value=1000, key="glide_n_sims")
+                glide_method = method if method in ("iid", "fixed_block", "stationary_block") else "stationary_block"
+                if glide_method != method:
+                    st.caption("The 'extreme/crash years' simulation approach isn't supported for this comparison - "
+                               "using 'Realistic historical patterns' instead just for this section.")
+
+                with st.spinner("Running glide path comparison..."):
+                    profile = ClientProfile(**profile_kwargs)
+                    # fixed-weight comparison at the STARTING equity weight, held constant for the whole horizon
+                    from portfolios import scale_to_equity_weight, weighted_avg_fee as _wfee
+                    fixed_weights = scale_to_equity_weight(glide_portfolio, glide_start)
+                    fixed_fee = _wfee(glide_portfolio)
+                    fixed_res = run_simulation(
+                        glide_portfolio, asset_df, cpi, profile, method=glide_method, n_sims=glide_n_sims,
+                        seed=seed, custom_weights=fixed_weights, custom_fee=fixed_fee,
+                    )
+                    glide_res = run_glide_path_simulation(
+                        glide_portfolio, asset_df, cpi, profile, start_equity_weight=glide_start,
+                        end_equity_weight=glide_end, method=glide_method, n_sims=glide_n_sims, seed=seed,
+                    )
+
+                glide_summary = pd.DataFrame([
+                    {**fixed_res.summary(), "Strategy": f"Fixed at {glide_start:.0%} equity"},
+                    {**glide_res.summary(), "Strategy": f"Glide {glide_start:.0%} → {glide_end:.0%} equity"},
+                ]).set_index("Strategy")
+                ci_col = glide_summary.pop("Ruin prob 95% CI")
+                glide_summary["Ruin prob 95% CI"] = ci_col.apply(lambda ci: f"{ci[0]:.1%} - {ci[1]:.1%}")
+                st.dataframe(glide_summary.style.format(fmt), use_container_width=True)
+
+                fig9 = go.Figure()
+                for label, res in [(f"Fixed {glide_start:.0%}", fixed_res), (f"Glide {glide_start:.0%}→{glide_end:.0%}", glide_res)]:
+                    median_path = np.median(res.paths, axis=0)
+                    fig9.add_trace(go.Scatter(x=np.arange(len(median_path)), y=median_path, mode="lines", name=label))
+                fig9.update_layout(title="Median portfolio value over time: fixed vs glide path",
+                                    xaxis_title="Year", yaxis_title="Portfolio value (£)", height=400,
+                                    margin=dict(l=10, r=10, t=40, b=10))
+                st.plotly_chart(fig9, use_container_width=True)
+
+        with tab_ann:
+            st.subheader("Should part of the pot be swapped for a guaranteed income?")
+            st.markdown(
+                "**In plain terms:** an annuity means handing over part of the pot, once, in exchange for an "
+                "income that's paid for as long as the client lives, no matter how long that is or what happens "
+                "to the stock market. This section compares 'give up X% of the pot for guaranteed income' against "
+                "'leave the whole pot invested and draw from it'."
+            )
+            st.caption(
+                "Uses real, dated UK best-buy annuity rates (see src/annuity.py for sources) and the same "
+                "survival-odds table as the mortality section above, so the comparison shows 'before death' "
+                "outcomes rather than just the raw horizon-end ruin probability."
+            )
+            run_annuity = st.checkbox("Compare annuitizing part of the pot vs. staying fully invested (slower)", value=False)
+            if run_annuity and chosen:
+                from annuity import annuitize, annuity_rate, MIN_QUOTED_AGE, MAX_QUOTED_AGE
+
+                ann_col1, ann_col2, ann_col3, ann_col4 = st.columns(4)
+                with ann_col1:
+                    annuity_portfolio = st.selectbox("Portfolio", chosen, key="annuity_portfolio", format_func=display_name)
+                with ann_col2:
+                    annuity_pct = st.slider("% of the pot to swap for guaranteed income", 0, 100, 30, step=5,
+                                             key="annuity_pct_slider") / 100.0
+                with ann_col3:
+                    annuity_joint_default = bool(use_mortality and joint_life)
+                    annuity_joint = st.checkbox(
+                        "Keep paying a partner after the client dies (at a lower rate)", value=annuity_joint_default,
+                        key="annuity_joint",
+                        help="Technical name: joint life, 50% to survivor. Costs more per £ of guaranteed income "
+                             "than a single-life annuity, since it's expected to pay out for longer.",
+                    )
+                with ann_col4:
+                    ann_n_sims = st.select_slider("Simulations", [500, 1000, 2000, 3000], value=2000, key="ann_n_sims")
+
+                if age < MIN_QUOTED_AGE or age > MAX_QUOTED_AGE:
+                    st.caption(
+                        f"Note: the quoted annuity-rate sources only cover ages {MIN_QUOTED_AGE}-{MAX_QUOTED_AGE} "
+                        f"- using the age-{MIN_QUOTED_AGE if age < MIN_QUOTED_AGE else MAX_QUOTED_AGE} rate as a "
+                        f"conservative proxy for age {age} rather than an unsourced extrapolation."
+                    )
+
+                base_profile = ClientProfile(**profile_kwargs)
+                annuitized_profile, ann_rate, annuity_income = annuitize(
+                    base_profile, annuity_pct, age, joint=annuity_joint
+                )
+                st.info(
+                    f"Annuitizing **{annuity_pct:.0%}** of the £{pot:,.0f} pot at age {age} "
+                    f"({'joint life' if annuity_joint else 'single life'}) buys a guaranteed "
+                    f"**£{annuity_income:,.0f}/year for life**, at today's rate of {ann_rate:.2%}. This income is "
+                    "LEVEL - it does NOT rise with inflation, unlike everything else in this plan, so its real "
+                    "purchasing power falls over time (roughly halving after ~20 years at ~3% inflation). It "
+                    f"leaves **£{annuitized_profile.starting_pot:,.0f}** in drawdown alongside the guaranteed income."
+                )
+
+                with st.spinner("Running annuitization comparison..."):
+                    res_drawdown = run_simulation(annuity_portfolio, asset_df, cpi, base_profile, method=method,
+                                                   n_sims=ann_n_sims, block_mean=block_mean, seed=seed)
+                    res_annuitized = run_simulation(annuity_portfolio, asset_df, cpi, annuitized_profile, method=method,
+                                                     n_sims=ann_n_sims, block_mean=block_mean, seed=seed)
+
+                ann_summary = pd.DataFrame([
+                    {**res_drawdown.summary(), "Strategy": "100% drawdown"},
+                    {**res_annuitized.summary(), "Strategy": f"{annuity_pct:.0%} annuitized"},
+                ]).set_index("Strategy")
+                ann_ci = ann_summary.pop("Ruin prob 95% CI")
+                ann_summary["Ruin prob 95% CI"] = ann_ci.apply(lambda ci: f"{ci[0]:.1%} - {ci[1]:.1%}")
+                st.dataframe(ann_summary.style.format(fmt), use_container_width=True)
+
+                st.markdown("**Mortality-adjusted comparison**")
+                ann_sex = sex if use_mortality else st.selectbox(
+                    "Sex (for mortality-adjusted outcomes)", ["male", "female"], format_func=str.title,
+                    key="annuity_sex",
+                )
+                ann_partner_age = partner_age if (use_mortality and joint_life) else (age - 2)
+                ann_partner_sex = partner_sex if (use_mortality and joint_life) else ("female" if ann_sex == "male" else "male")
+                mortality_table_ann = load_mortality_table()
+                mr_drawdown = run_mortality_overlay(
+                    res_drawdown, mortality_table_ann, sex=ann_sex,
+                    partner_age=ann_partner_age if annuity_joint else None,
+                    partner_sex=ann_partner_sex if annuity_joint else None,
+                )
+                mr_annuitized = run_mortality_overlay(
+                    res_annuitized, mortality_table_ann, sex=ann_sex,
+                    partner_age=ann_partner_age if annuity_joint else None,
+                    partner_sex=ann_partner_sex if annuity_joint else None,
+                )
+                mort_ann_rows = []
+                for label, mr in [("100% drawdown", mr_drawdown), (f"{annuity_pct:.0%} annuitized", mr_annuitized)]:
+                    s = mr.summary()
+                    s["Strategy"] = label
+                    del s["Life basis"], s["N sims"]
+                    mort_ann_rows.append(s)
+                mort_ann_df = pd.DataFrame(mort_ann_rows).set_index("Strategy")
+                st.dataframe(mort_ann_df.style.format(mort_fmt), use_container_width=True)
+                st.caption(
+                    f"Life basis: **{mr_drawdown.life_basis}**. 'Ruin before death' is the outcome that actually "
+                    "matters for the client - the pot running out while they (or their partner) are still alive - "
+                    "as opposed to the raw horizon-end figure above, which also counts paths that only run dry "
+                    "after everyone involved has already died."
+                )
+
+                fig_ann = go.Figure()
+                for label, res in [("100% drawdown", res_drawdown), (f"{annuity_pct:.0%} annuitized", res_annuitized)]:
+                    median_path = np.median(res.paths, axis=0)
+                    fig_ann.add_trace(go.Scatter(x=np.arange(len(median_path)), y=median_path, mode="lines", name=label))
+                fig_ann.update_layout(
+                    title="Median pot value over time: drawdown vs annuitized (annuity income paid separately, not shown)",
+                    xaxis_title="Year", yaxis_title="Pot value (£)", height=400,
+                    margin=dict(l=10, r=10, t=40, b=10),
+                )
+                st.plotly_chart(fig_ann, use_container_width=True)
+                st.caption(
+                    "Annuitizing shrinks the pot immediately (money moves out to buy the annuity) but replaces "
+                    "part of the withdrawal need with guaranteed income for life, which is why probability of "
+                    "ruin normally falls even though the pot chart above looks smaller throughout. Rates used: "
+                    "single-life, LEVEL income (doesn't rise with inflation), no minimum payment period, per "
+                    "published Hargreaves Lansdown best-buy data (14-28 May 2026, see src/annuity.py) - a "
+                    "simplification. It doesn't model taking a 25% tax-free lump sum first (PCLS), a minimum "
+                    "guaranteed payment period, and the joint-life (paying a partner too) discount uses one "
+                    "age-65 data point applied at every age. Real quotes vary by provider, postcode and health, "
+                    "and should always be checked with an actual quote before a client acts on this."
+                )
+
+        with tab_hold:
+            with st.expander("Portfolio holdings & assumptions"):
+                for name in ordered_names(chosen):
+                    st.markdown(f"**{display_name(name)}** — weighted-average OCF: {weighted_avg_fee(name)*100:.3f}% pa")
+                    st.dataframe(portfolio_summary(name), use_container_width=True)
+                st.markdown(
+                    "Fund-level returns are mapped to broad asset-class index returns (Bloomberg data, "
+                    "1999/2000–2026) for the simulation, since several individual fund return histories are "
+                    "too short for a reliable long-run bootstrap. See `src/portfolios.py` for the full mapping "
+                    "and fee assumptions."
+                )
