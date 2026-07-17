@@ -35,14 +35,6 @@ Alternative,BLK Aquila Life European Equity Index Fund,Global Equities,0.08,0.00
 Alternative,BLK Aquila Life Japanese Equity Fund,Global Equities,0.05,0.0007
 Alternative,L&G GPBV MSCI Minimum Volatility Index Fund,Global Equities,0.04,0.0007
 Alternative,BLK AQC Emerging Markets Fund,EM Equities,0.167,0.0007
-Better,Global equities (core),Global Equities,0.45,0.0007
-Better,EM equities,EM Equities,0.12,0.0007
-Better,Global REITs,REITs,0.05,0.0007
-Better,Global infrastructure,Infrastructure,0.03,0.0007
-Better,Global bonds (agg),Global Bonds,0.15,0.0007
-Better,UK index-linked gilts,UK Index-Linked Gilts,0.08,0.0007
-Better,Securitised / diversified credit,Securitised Credit,0.1,0.0007
-Better,Cash,Cash,0.02,0.0007
 Four Seasons,Cash,Cash,0.005,0.0
 Four Seasons,abrdn Global Inflation-Linked Bond Tracker Fund,UK Index-Linked Gilts,0.085,0.0016
 Four Seasons,abrdn Short-dated Global Inflation-Linked Bond Fund,UK Index-Linked Gilts,0.0925,0.0016
@@ -71,3 +63,14 @@ Four Seasons,Man Global Resources Equity Fund,Commodities,0.0125,0.008
 Four Seasons,Neuberger Berman Commodities Fund,Commodities,0.025,0.0085
 Four Seasons,iShares Physical Gold ETC,Commodities,0.0375,0.0012
 Four Seasons,WisdomTree Physical Gold - GBP Daily Hedged - ETC,Commodities,0.0375,0.0025
+Better,Global Agg Bonds,Global Agg Bonds,0.325,0.0007
+Better,Eq Gbl DM Quality Gross,Eq Gbl DM Quality Gross,0.125,0.0007
+Better,Eq Gbl DM Novum Mgd Vol,Eq Gbl DM Novum Mgd Vol,0.2,0.0007
+Better,Eq EM Net,Eq EM Net,0.025,0.0007
+Better,US HY Corp Bond,US HY Corp Bond,0.025,0.0007
+Better,US ABS,US ABS,0.05,0.0007
+Better,EM Corp Bond,EM Corp Bond,0.025,0.0007
+Better,US Prop REITS,US Prop REITS,0.025,0.0007
+Better,Commod,Commod,0.05,0.0007
+Better,Hedge Fund Credit Suisse,Hedge Fund Credit Suisse,0.075,0.0007
+Better,HF Trend,HF Trend,0.075,0.0007
