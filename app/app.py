@@ -45,7 +45,7 @@ st.set_page_config(page_title="Mobius Wealth Decumulation Simulator", layout="wi
 # and Better are Mobius's two offerings, given adjacent hues from a colourblind-safe categorical
 # order so they're distinct at a glance and consistent in every chart below.
 PORTFOLIO_DISPLAY = {
-    "Original": "Aspen Original",
+    "Original": "Aspen Growth Passive Plus",
     "Alternative": "Mobius Alternative",
     "Better": "Mobius Better",
     "Four Seasons": "Aspen Four Seasons",
@@ -73,7 +73,7 @@ def _hex_to_rgba(hex_color: str, alpha: float) -> str:
 
 
 def ordered_names(names) -> list:
-    """Accumulation pair first (Aspen Original, Mobius Alternative), then the decumulation pair
+    """Accumulation pair first (Aspen Growth Passive Plus, Mobius Alternative), then the decumulation pair
     (Aspen Four Seasons, Mobius Better), regardless of sidebar selection order."""
     order = ["Original", "Alternative", "Four Seasons", "Better"]
     return [n for n in order if n in names] + [n for n in names if n not in order]
@@ -310,7 +310,7 @@ def _pdf_section_table(pdf, section_title, names, sim_results, profile_kwargs, a
 def build_summary_pdf(accum_results: dict, decum_results: dict, accum_profile_kwargs: dict,
                        decum_profile_kwargs: dict, asset_df, cpi, age: int, pot: float,
                        spend: float, horizon: int, wr: float) -> bytes:
-    """One-page client-facing takeaway covering both the Accumulation (Aspen Original vs Mobius
+    """One-page client-facing takeaway covering both the Accumulation (Aspen Growth Passive Plus vs Mobius
     Alternative) and Decumulation (Aspen Four Seasons vs Mobius Better) comparisons, as a PDF an
     adviser can hand over or attach to an email after the meeting."""
     pdf = FPDF(orientation="P", unit="mm", format="A4")
@@ -353,7 +353,7 @@ def build_summary_pdf(accum_results: dict, decum_results: dict, accum_profile_kw
         pdf.multi_cell(
             0, 6,
             f"Accumulation - same underlying market exposure, lower cost ({fee_orig:.2f}% vs "
-            f"{fee_alt:.2f}% pa): Mobius Alternative {legacy_phrase} than Aspen Original over the "
+            f"{fee_alt:.2f}% pa): Mobius Alternative {legacy_phrase} than Aspen Growth Passive Plus over the "
             f"same horizon, for holdings that track essentially the same indices.",
         )
         pdf.ln(4)
@@ -444,7 +444,7 @@ with st.expander("All assumptions — what's baked into these numbers"):
         "to 1999/2000) rather than its own short fund history, because many individual fund series "
         "in the data are too short (some as little as 20 months) to bootstrap a 25+ year simulation "
         "from directly.\n"
-        "- Aspen Original vs Mobius Alternative largely hold the SAME underlying index exposure (the "
+        "- Aspen Growth Passive Plus vs Mobius Alternative largely hold the SAME underlying index exposure (the "
         "FNZ data literally labels several pairs 'Same Index') — the difference being compared is "
         "fee (AMC), not market return.\n"
         "- Four Seasons holdings/weights come from the FNZ data supplied 14 July 2026; a few holdings "
@@ -538,7 +538,7 @@ with st.sidebar:
         view_mode = st.radio(
             "Which comparison do you want to see?",
             ["Both", "Accumulation only", "Decumulation only"],
-            help="Accumulation compares Aspen Original vs Mobius Alternative (growing the pot, no "
+            help="Accumulation compares Aspen Growth Passive Plus vs Mobius Alternative (growing the pot, no "
                  "withdrawals). Decumulation compares Aspen Four Seasons vs Mobius Better (spending "
                  "from the pot). Pick one if you only need a single scenario for this conversation - "
                  "'Both' recomputes and shows everything, which takes a little longer.",
@@ -553,7 +553,7 @@ with st.sidebar:
                 format_func=display_name,
                 help="Drives the decumulation charts/statistics below and the 'Detailed analysis' section "
                      "further down. Defaults to the decumulation comparison (Aspen Four Seasons vs Mobius "
-                     "Better) - the Accumulation section above always shows Aspen Original vs Mobius "
+                     "Better) - the Accumulation section above always shows Aspen Growth Passive Plus vs Mobius "
                      "Alternative regardless of this selection.",
             )
         else:
@@ -772,7 +772,7 @@ if cma_blend > 0:
     cma_shift_table = cma_mod.cma_shifts(asset_df, AC)
     asset_df = cma_mod.apply_cma_blend(asset_df, AC, cma_blend)
 
-# Accumulation pair (Aspen Original vs Mobius Alternative) always runs with NO withdrawals - a
+# Accumulation pair (Aspen Growth Passive Plus vs Mobius Alternative) always runs with NO withdrawals - a
 # separate, fixed comparison from the decumulation multiselect below, since accumulation is about
 # pure growth, not spending. Guardrails/tax are moot with zero spend, so left off regardless of the
 # sidebar toggles (which apply to decumulation only).
@@ -806,13 +806,13 @@ for name in chosen:
 
 # ACCUMULATION section - the 5-second takeaway, filled into the container declared right under the
 # title so it renders at the TOP of the page even though it depends on the sidebar inputs computed
-# above. Always Aspen Original vs Mobius Alternative, growing the pot with no withdrawals - matches
+# above. Always Aspen Growth Passive Plus vs Mobius Alternative, growing the pot with no withdrawals - matches
 # the previous Mobius model's own accumulation-style summary (compound return / volatility / prob of
 # ruin / cumulative performance chart), not the decumulation multiselect below.
 if show_accum:
     with hero_container:
         render_comparison_section(
-            "Accumulation — Aspen Original vs Mobius Alternative",
+            "Accumulation — Aspen Growth Passive Plus vs Mobius Alternative",
             "No withdrawals: growing the pot from today until the horizon ends. Probability of ruin is "
             "included for consistency but is trivially ~0% here since nothing is being withdrawn - "
             "volatility, annualised performance and cumulative performance are the metrics that matter "
@@ -831,7 +831,7 @@ if show_accum:
         )
         st.success(
             f"**Same underlying market exposure, lower cost** ({fee_orig:.2f}% → {fee_alt:.2f}% pa): over "
-            f"{horizon} years, Mobius Alternative {legacy_phrase} than Aspen Original, for holdings that "
+            f"{horizon} years, Mobius Alternative {legacy_phrase} than Aspen Growth Passive Plus, for holdings that "
             "track essentially the same indices."
         )
 
@@ -903,7 +903,7 @@ if show_decum:
     st.info(" ".join(_summary_bits))
 elif show_accum:
     _summary_bits = [
-        f"Comparing **Aspen Original** vs **Mobius Alternative** for a **{age}-year-old** growing a "
+        f"Comparing **Aspen Growth Passive Plus** vs **Mobius Alternative** for a **{age}-year-old** growing a "
         f"**£{pot:,.0f}** pot over **{horizon} years** (no withdrawals)."
     ]
     if cma_blend > 0:
