@@ -285,15 +285,22 @@ def render_comparison_section(title, caption, names, sim_results, hist_profile_k
     return hist_paths
 
 
-def _pdf_section_table(pdf, section_title, names, sim_results, profile_kwargs, asset_df, cpi):
+def _pdf_section_table(pdf, section_title, names, sim_results, profile_kwargs, asset_df, cpi,
+                        show_ruin: bool = True):
     pdf.set_font("Helvetica", "B", 13)
     pdf.set_text_color(20, 20, 20)
     pdf.cell(0, 8, section_title, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.ln(1)
 
-    col_widths = [38, 24, 17, 19, 18, 16, 14, 30]
-    headers = ["Portfolio", "Annualised perf.", "Volatility", "Prob. of ruin", "Cumulative", "IRR", "Fee",
-               "Data period"]
+    # Prob. of ruin is dropped for Accumulation (no withdrawals ever happen there, so it's always
+    # ~0% and not a meaningful comparison point) but kept for Decumulation, where it's the headline
+    # risk metric - same distinction the live app's cards already make.
+    col_widths = [38, 24, 17, 18, 16, 14, 30]
+    headers = ["Portfolio", "Annualised perf.", "Volatility", "Cumulative", "IRR", "Fee", "Data period"]
+    if show_ruin:
+        col_widths.insert(3, 19)
+        headers.insert(3, "Prob. of ruin")
+
     pdf.set_font("Helvetica", "B", 8)
     pdf.set_fill_color(230, 230, 230)
     for w, h in zip(col_widths, headers):
@@ -311,22 +318,24 @@ def _pdf_section_table(pdf, section_title, names, sim_results, profile_kwargs, a
         period = portfolio_data_period(name, asset_df)
         r, g, b = (int(portfolio_color(name).lstrip("#")[i:i + 2], 16) for i in (0, 2, 4))
         pdf.set_text_color(r, g, b)
-        pdf.cell(col_widths[0], 8, display_name(name), border=1)
+        col = 0
+        pdf.cell(col_widths[col], 8, display_name(name), border=1); col += 1
         pdf.set_text_color(0, 0, 0)
-        pdf.cell(col_widths[1], 8, f"{cagr*100:.2f}% pa", border=1)
-        pdf.cell(col_widths[2], 8, f"{vol*100:.2f}% pa", border=1)
-        pdf.cell(col_widths[3], 8, f"{s['Probability of ruin']*100:.1f}%", border=1)
-        pdf.cell(col_widths[4], 8, f"{cum_pct:+.1f}%", border=1)
-        pdf.cell(col_widths[5], 8, f"{irr*100:.2f}%" if not np.isnan(irr) else "n/a", border=1)
-        pdf.cell(col_widths[6], 8, f"{fee_pct:.2f}%", border=1)
+        pdf.cell(col_widths[col], 8, f"{cagr*100:.2f}% pa", border=1); col += 1
+        pdf.cell(col_widths[col], 8, f"{vol*100:.2f}% pa", border=1); col += 1
+        if show_ruin:
+            pdf.cell(col_widths[col], 8, f"{s['Probability of ruin']*100:.1f}%", border=1); col += 1
+        pdf.cell(col_widths[col], 8, f"{cum_pct:+.1f}%", border=1); col += 1
+        pdf.cell(col_widths[col], 8, f"{irr*100:.2f}%" if not np.isnan(irr) else "n/a", border=1); col += 1
+        pdf.cell(col_widths[col], 8, f"{fee_pct:.2f}%", border=1); col += 1
         pdf.set_font("Helvetica", "", 7)
-        pdf.cell(col_widths[7], 8, period, border=1)
+        pdf.cell(col_widths[col], 8, period, border=1)
         pdf.set_font("Helvetica", "", 8)
         pdf.ln()
     pdf.ln(3)
 
     dd_col_widths = [40, 35, 35, 35, 35]
-    dd_headers = ["Portfolio", "Max DD", "Average DD", "CVaR 95 Mthly", "CVaR 95 Ann"]
+    dd_headers = ["Portfolio", "Max DD*", "Average DD*", "CVaR 95 Mthly", "CVaR 95 Ann"]
     pdf.set_font("Helvetica", "B", 8)
     pdf.set_text_color(90, 90, 90)
     pdf.cell(0, 6, "Downside stats", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
@@ -368,22 +377,13 @@ def build_summary_pdf(accum_results: dict, decum_results: dict, accum_profile_kw
     pdf.set_font("Helvetica", "", 11)
     pdf.set_text_color(90, 90, 90)
     pdf.cell(0, 7, f"Prepared for {prepared_for}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-    pdf.ln(2)
-
-    pdf.set_font("Helvetica", "", 10)
-    pdf.set_text_color(0, 0, 0)
-    pdf.multi_cell(
-        0, 6,
-        f"Client: age {age}, £{pot:,.0f} starting pot, wanting £{spend:,.0f}/year in decumulation "
-        f"({wr*100:.1f}% withdrawal rate) to last {horizon} years.",
-    )
     pdf.ln(4)
 
+    # Accumulation: table (no Prob. of ruin column - always ~0% with no withdrawals, not a useful
+    # comparison point there) then its own narrative directly underneath, not grouped with
+    # Decumulation's at the bottom of the page.
     _pdf_section_table(pdf, "Accumulation (no withdrawals)", list(accum_results.keys()), accum_results,
-                        accum_profile_kwargs, asset_df, cpi)
-    _pdf_section_table(pdf, "Decumulation (with withdrawals)", list(decum_results.keys()), decum_results,
-                        decum_profile_kwargs, asset_df, cpi)
-
+                        accum_profile_kwargs, asset_df, cpi, show_ruin=False)
     if len(accum_results) == 2:
         a, b = accum_results.keys()
         same_exposure = similar_exposure(a, b)
@@ -395,6 +395,7 @@ def build_summary_pdf(accum_results: dict, decum_results: dict, accum_profile_kw
             else f"grows to GBP {abs(legacy_gain):,.0f} less"
         )
         pdf.set_font("Helvetica", "B", 11)
+        pdf.set_text_color(0, 0, 0)
         if same_exposure:
             pdf.multi_cell(
                 0, 6,
@@ -411,6 +412,51 @@ def build_summary_pdf(accum_results: dict, decum_results: dict, accum_profile_kw
             )
         pdf.ln(4)
 
+    # Decumulation: table (Prob. of ruin kept - the headline risk metric once withdrawals start)
+    # then its own narrative directly underneath.
+    _pdf_section_table(pdf, "Decumulation (with withdrawals)", list(decum_results.keys()), decum_results,
+                        decum_profile_kwargs, asset_df, cpi, show_ruin=True)
+    if len(decum_results) == 2:
+        x, y = decum_results.keys()
+        sx, sy = decum_results[x].summary(), decum_results[y].summary()
+        # name the lower-probability-of-ruin one "b" (the one the sentence is framed around),
+        # regardless of which position it was passed in, so the phrasing always reads correctly
+        if sy["Probability of ruin"] <= sx["Probability of ruin"]:
+            a, b, s_a, s_b = x, y, sx, sy
+        else:
+            a, b, s_a, s_b = y, x, sy, sx
+        ruin_diff_pp = (s_a["Probability of ruin"] - s_b["Probability of ruin"]) * 100
+        legacy_diff = s_b["Median legacy"] - s_a["Median legacy"]
+        _, vol_a = historical_stats(a, asset_df)
+        _, vol_b = historical_stats(b, asset_df)
+        legacy_phrase = (
+            f"lifts median legacy by GBP {legacy_diff:,.0f}" if legacy_diff > 0
+            else f"reduces median legacy by GBP {abs(legacy_diff):,.0f}"
+        )
+        vol_phrase = (
+            f"with lower volatility too ({vol_b*100:.2f}% vs {vol_a*100:.2f}% pa)" if vol_b < vol_a
+            else f"volatility: {vol_b*100:.2f}% vs {vol_a*100:.2f}% pa"
+        )
+        pdf.set_font("Helvetica", "B", 11)
+        pdf.set_text_color(0, 0, 0)
+        pdf.multi_cell(
+            0, 6,
+            f"Decumulation - {display_name(b)} cuts probability of ruin by {ruin_diff_pp:.1f} "
+            f"percentage points versus {display_name(a)}, and {legacy_phrase}, {vol_phrase}.",
+        )
+        pdf.ln(4)
+
+    # Client scenario recap - placed here (not at the top) since the spend/withdrawal-rate figures
+    # only apply to Decumulation; Accumulation above has no spend at all.
+    pdf.set_font("Helvetica", "", 10)
+    pdf.set_text_color(0, 0, 0)
+    pdf.multi_cell(
+        0, 6,
+        f"Client: age {age}, £{pot:,.0f} starting pot, wanting £{spend:,.0f}/year in decumulation "
+        f"({wr*100:.1f}% withdrawal rate) to last {horizon} years.",
+    )
+    pdf.ln(4)
+
     pdf.set_font("Helvetica", "I", 8)
     pdf.set_text_color(120, 120, 120)
     pdf.multi_cell(
@@ -418,6 +464,31 @@ def build_summary_pdf(accum_results: dict, decum_results: dict, accum_profile_kw
         "Illustrative only - based on a Monte Carlo simulation of historical UK/global market data "
         "(1999/2000-2026), not a guarantee of future performance or personalised advice. Generated by "
         "the Mobius Wealth Decumulation Simulator.",
+    )
+    pdf.ln(2)
+    pdf.multi_cell(
+        0, 5,
+        "* Important: Maximum Drawdown (Max DD) and Average Drawdown (Avg DD) figures presented in "
+        "this report are calculated based on portfolio performance excluding the impact of investor "
+        "withdrawals. As a result, these statistics reflect the strategy's underlying investment "
+        "performance rather than cash-flow-driven declines in portfolio value.",
+    )
+
+    pdf.ln(4)
+    pdf.set_font("Helvetica", "", 6)
+    pdf.set_text_color(140, 140, 140)
+    pdf.multi_cell(
+        0, 3.2,
+        "Mobius Life Limited is authorised by the Prudential Regulation Authority and regulated by the "
+        "Financial Conduct Authority and the Prudential Regulation Authority. Mobius Life Administration "
+        "Services is not authorised or regulated.",
+    )
+    pdf.ln(1)
+    pdf.multi_cell(
+        0, 3.2,
+        "Mobius Life Limited (Registered No. 3104978) and Mobius Life Administration Services "
+        "(Registered No. 5754821) are registered in England and Wales at: 2nd Floor, 2 Copthall Avenue, "
+        "London, EC2R 7DA.",
     )
     return bytes(pdf.output())
 
