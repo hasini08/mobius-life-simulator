@@ -394,11 +394,11 @@ def build_summary_pdf(accum_results: dict, decum_results: dict, accum_profile_kw
         f"last until age {age + horizon} without running out."
     )
 
-    # Accumulation: client context first, then table (no Prob. of ruin column - always ~0% with no
-    # withdrawals, not a useful comparison point there), then its own narrative directly underneath,
-    # not grouped with Decumulation's at the bottom of the page.
+    # Accumulation: table (no Prob. of ruin column - always ~0% with no withdrawals, not a useful
+    # comparison point there) then its own narrative directly underneath, not grouped with
+    # Decumulation's at the bottom of the page.
     _pdf_section_table(pdf, "Accumulation (no withdrawals)", list(accum_results.keys()), accum_results,
-                        accum_profile_kwargs, asset_df, cpi, show_ruin=False, intro_text=client_line)
+                        accum_profile_kwargs, asset_df, cpi, show_ruin=False)
     if len(accum_results) == 2:
         a, b = accum_results.keys()
         same_exposure = similar_exposure(a, b)
@@ -427,10 +427,11 @@ def build_summary_pdf(accum_results: dict, decum_results: dict, accum_profile_kw
             )
         pdf.ln(4)
 
-    # Decumulation: table (Prob. of ruin kept - the headline risk metric once withdrawals start)
-    # then its own narrative directly underneath.
+    # Decumulation: client context first (spend/withdrawal rate only apply once withdrawals start,
+    # so this doesn't belong under Accumulation above), then table (Prob. of ruin kept - the
+    # headline risk metric here), then its own narrative directly underneath.
     _pdf_section_table(pdf, "Decumulation (with withdrawals)", list(decum_results.keys()), decum_results,
-                        decum_profile_kwargs, asset_df, cpi, show_ruin=True)
+                        decum_profile_kwargs, asset_df, cpi, show_ruin=True, intro_text=client_line)
     if len(decum_results) == 2:
         x, y = decum_results.keys()
         sx, sy = decum_results[x].summary(), decum_results[y].summary()
