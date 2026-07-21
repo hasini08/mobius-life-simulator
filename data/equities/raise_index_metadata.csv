@@ -1,0 +1,5 @@
+Name,Type,Source
+FTSE Developed AWD (benchmark),Benchmark,FTSE Russell
+RAISE,Real factor index (simulation),FTSE Russell
+RAISE + Mom Leaders,Real factor index (simulation),FTSE Russell
+RAISE + Low Vol Leaders,Real factor index (simulation),FTSE Russell
