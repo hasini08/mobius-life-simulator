@@ -286,11 +286,17 @@ def render_comparison_section(title, caption, names, sim_results, hist_profile_k
 
 
 def _pdf_section_table(pdf, section_title, names, sim_results, profile_kwargs, asset_df, cpi,
-                        show_ruin: bool = True):
+                        show_ruin: bool = True, intro_text: str = None):
     pdf.set_font("Helvetica", "B", 13)
     pdf.set_text_color(20, 20, 20)
     pdf.cell(0, 8, section_title, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.ln(1)
+
+    if intro_text:
+        pdf.set_font("Helvetica", "", 10)
+        pdf.set_text_color(0, 0, 0)
+        pdf.multi_cell(0, 6, intro_text)
+        pdf.ln(2)
 
     # Prob. of ruin is dropped for Accumulation (no withdrawals ever happen there, so it's always
     # ~0% and not a meaningful comparison point) but kept for Decumulation, where it's the headline
@@ -379,11 +385,20 @@ def build_summary_pdf(accum_results: dict, decum_results: dict, accum_profile_kw
     pdf.cell(0, 7, f"Prepared for {prepared_for}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.ln(4)
 
-    # Accumulation: table (no Prob. of ruin column - always ~0% with no withdrawals, not a useful
-    # comparison point there) then its own narrative directly underneath, not grouped with
-    # Decumulation's at the bottom of the page.
+    # "To last N years" is ambiguous on its own (last until when? guaranteed, or just targeted?) -
+    # spelled out explicitly here as "the pot needs to last until age X without running out" so a
+    # reader doesn't have to infer it.
+    client_line = (
+        f"Client: age {age}, £{pot:,.0f} starting pot, wanting to draw £{spend:,.0f}/year in "
+        f"decumulation ({wr*100:.1f}% withdrawal rate) for {horizon} years - i.e. the pot needs to "
+        f"last until age {age + horizon} without running out."
+    )
+
+    # Accumulation: client context first, then table (no Prob. of ruin column - always ~0% with no
+    # withdrawals, not a useful comparison point there), then its own narrative directly underneath,
+    # not grouped with Decumulation's at the bottom of the page.
     _pdf_section_table(pdf, "Accumulation (no withdrawals)", list(accum_results.keys()), accum_results,
-                        accum_profile_kwargs, asset_df, cpi, show_ruin=False)
+                        accum_profile_kwargs, asset_df, cpi, show_ruin=False, intro_text=client_line)
     if len(accum_results) == 2:
         a, b = accum_results.keys()
         same_exposure = similar_exposure(a, b)
@@ -445,17 +460,6 @@ def build_summary_pdf(accum_results: dict, decum_results: dict, accum_profile_kw
             f"percentage points versus {display_name(a)}, and {legacy_phrase}, {vol_phrase}.",
         )
         pdf.ln(4)
-
-    # Client scenario recap - placed here (not at the top) since the spend/withdrawal-rate figures
-    # only apply to Decumulation; Accumulation above has no spend at all.
-    pdf.set_font("Helvetica", "", 10)
-    pdf.set_text_color(0, 0, 0)
-    pdf.multi_cell(
-        0, 6,
-        f"Client: age {age}, £{pot:,.0f} starting pot, wanting £{spend:,.0f}/year in decumulation "
-        f"({wr*100:.1f}% withdrawal rate) to last {horizon} years.",
-    )
-    pdf.ln(4)
 
     pdf.set_font("Helvetica", "I", 8)
     pdf.set_text_color(120, 120, 120)
