@@ -90,6 +90,36 @@ def portfolio_monthly_returns(name: str, asset_df: pd.DataFrame) -> pd.Series:
     return weighted_monthly_returns(weights, fee, asset_df, label=name)
 
 
+def downside_stats(name: str, asset_df: pd.DataFrame, custom_weights=None, custom_fee=None) -> dict:
+    """Max DD (single worst peak-to-trough drawdown), Average DD (mean of the running drawdown
+    series - a 'typical' rather than worst-case figure), and CVaR at monthly and rolling-12m
+    horizons (average of the return series' own worst 5% tail). Shared by the app's PDF export and
+    the equity-income framework (single shares/baskets aren't always registered in PORTFOLIOS, so
+    custom_weights/custom_fee let a caller bypass the name lookup, mirroring run_simulation's own
+    override convention)."""
+    if custom_weights is not None:
+        fee = custom_fee if custom_fee is not None else weighted_avg_fee(name)
+        monthly = weighted_monthly_returns(custom_weights, fee, asset_df, label=name).dropna()
+    else:
+        monthly = portfolio_monthly_returns(name, asset_df).dropna()
+
+    dd, worst_dd, dd_series = 0.0, 0.0, []
+    for r in monthly.to_numpy():
+        dd = min(0.0, (1 + dd) * (1 + r) - 1)
+        worst_dd = min(worst_dd, dd)
+        dd_series.append(dd)
+    avg_dd = float(np.mean(dd_series))
+
+    def cvar(series):
+        s = pd.Series(series).dropna()
+        threshold = np.percentile(s, 5)
+        tail = s[s < threshold]
+        return float(tail.mean()) if len(tail) else float(threshold)
+
+    rolling_12m = monthly.rolling(12).apply(lambda x: np.prod(1 + x) - 1, raw=True).dropna()
+    return dict(maxdd=worst_dd, avgdd=avg_dd, cvar_m=cvar(monthly), cvar_a=cvar(rolling_12m))
+
+
 @dataclass
 class ClientProfile:
     starting_age: int = 65

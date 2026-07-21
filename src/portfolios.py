@@ -8,11 +8,12 @@ Defines the portfolios being compared in the model:
                     index-linked gilts) in the spirit of the "Better" portfolio in the previous
                     Mobius model, which cut probability of ruin materially vs a plain equity/bond mix.
 
-DATA-DRIVEN: portfolio holdings/weights/fees and the asset-class name mapping both live in
-data/portfolio_holdings.csv and data/asset_class_map.csv respectively - not hardcoded here - so they
-can be edited directly (by hand, or via the app's in-app editor) without touching this file. This
-module just loads those two sheets and exposes the same functions/shape as before; nothing else in
-engine.py or app.py needs to change.
+DATA-DRIVEN: portfolio holdings/weights/fees, the asset-class name mapping, and each portfolio's
+display name/owner/provider live in data/portfolio_holdings.csv, data/asset_class_map.csv and
+data/portfolio_meta.csv respectively - not hardcoded here - so a brand new portfolio (a different
+competitor's fund, say) can be added directly (by hand, or via the app's in-app editor) without
+touching this file or engine.py. This module just loads those sheets and exposes the same
+functions/shape as before.
 
 ASSUMPTIONS (clearly flagged - confirm/replace with real data where possible):
   1. Many individual fund return series in the Bloomberg data have short histories (some as little
@@ -38,6 +39,7 @@ import pandas as pd
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 HOLDINGS_CSV = DATA_DIR / "portfolio_holdings.csv"
 ASSET_MAP_CSV = DATA_DIR / "asset_class_map.csv"
+PORTFOLIO_META_CSV = DATA_DIR / "portfolio_meta.csv"
 
 
 def load_asset_class_map(path=ASSET_MAP_CSV) -> dict:
@@ -57,8 +59,21 @@ def load_portfolios(path=HOLDINGS_CSV) -> dict:
     return portfolios
 
 
+def load_portfolio_meta(path=PORTFOLIO_META_CSV) -> dict:
+    """Reads per-portfolio presentation metadata (DisplayName, Owner - 'Mobius' or 'Competitor',
+    Provider - the fund house's name) into {name: {DisplayName, Owner, Provider}}. This is what
+    lets the app compare Mobius against ANY registered competitor's portfolio, not just Aspen's -
+    a new portfolio just needs a row here (and in portfolio_holdings.csv) to get correctly
+    labelled/coloured everywhere, with no code changes. Portfolios missing a row here fall back to
+    sensible defaults in the app (display name = the portfolio's own key, Owner = 'Competitor')."""
+    df = pd.read_csv(path)
+    return {row.Portfolio: {"DisplayName": row.DisplayName, "Owner": row.Owner, "Provider": row.Provider}
+            for row in df.itertuples(index=False)}
+
+
 AC = load_asset_class_map()
 PORTFOLIOS = load_portfolios()
+PORTFOLIO_META = load_portfolio_meta()
 
 
 def portfolio_summary(name):

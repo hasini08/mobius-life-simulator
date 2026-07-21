@@ -5,8 +5,9 @@ Run with:
     pip install -r requirements.txt
     streamlit run app.py
 
-Lets a user compare the Original / Alternative / Better portfolios (or blend a custom mix),
-switch sampling method, and toggle spending guardrails on/off, to see the impact on
+Lets a user compare Mobius against ANY registered portfolio - a competitor's fund, or another
+Mobius construction - not just the four bundled examples (Original/Alternative/Four Seasons/
+Better), switch sampling method, and toggle spending guardrails on/off, to see the impact on
 probability of ruin, spending shortfall and legacy.
 """
 import sys
@@ -26,11 +27,12 @@ from engine import (
     load_asset_returns, load_cpi, run_simulation, historical_single_path, ClientProfile, equity_sweep,
     sensitivity_withdrawal_rate, sensitivity_guardrail_band, run_glide_path_simulation,
     asset_correlation_matrix, shortfall_heatmap, run_mortality_overlay, weighted_monthly_returns,
+    downside_stats,
 )
 import portfolios as portfolios_mod
 from portfolios import (
-    PORTFOLIOS, portfolio_summary, weighted_avg_fee, asset_class_weights, AC,
-    HOLDINGS_CSV, ASSET_MAP_CSV,
+    PORTFOLIOS, PORTFOLIO_META, portfolio_summary, weighted_avg_fee, asset_class_weights, AC,
+    HOLDINGS_CSV, ASSET_MAP_CSV, PORTFOLIO_META_CSV,
 )
 from mortality import load_mortality_table, survival_curve, joint_survival_curve, life_expectancy
 import tax
@@ -38,32 +40,54 @@ import cma as cma_mod
 
 st.set_page_config(page_title="Mobius Wealth Decumulation Simulator", layout="wide")
 
-# Client-facing branding: internal simulation keys ("Original"/"Alternative"/"Better", used
-# throughout src/portfolios.py and src/engine.py) are left untouched - only how they're LABELLED
-# and COLOURED in this app changes. "Original" is Aspen Advisers UK's own current fund lineup
-# (the client's status quo, so it gets a neutral grey, not a competing brand colour); Alternative
-# and Better are Mobius's two offerings, given adjacent hues from a colourblind-safe categorical
-# order so they're distinct at a glance and consistent in every chart below.
-PORTFOLIO_DISPLAY = {
-    "Original": "Aspen Growth Passive Plus",
-    "Alternative": "Mobius Alternative",
-    "Better": "Mobius Better",
-    "Four Seasons": "Aspen Four Seasons",
-}
-PORTFOLIO_COLORS = {
-    "Original": "#6b6f76",
-    "Alternative": "#1baf7a",
-    "Better": "#eda100",
-    "Four Seasons": "#494d54",
-}
+# Client-facing branding: internal simulation keys (used throughout src/portfolios.py and
+# src/engine.py) are left untouched - only how a portfolio is LABELLED and COLOURED in this app
+# changes, driven entirely by data/portfolio_meta.csv (DisplayName/Owner/Provider per portfolio),
+# so ANY registered competitor's fund - not just Aspen's - gets sensible branding automatically,
+# with no code changes. A portfolio missing a metadata row (e.g. freshly added and not yet
+# labelled) falls back to its own internal name and a "Competitor" colour. Mobius-owned portfolios
+# get a warm brand palette; everyone else's get neutral greys, so a plain glance always tells you
+# which side of the comparison is ours - both palettes are colourblind-safe categorical orders,
+# assigned by each portfolio's registration order within its own Owner group so colours stay
+# stable as portfolios are added.
+MOBIUS_PALETTE = ["#1baf7a", "#eda100", "#3b7dd8", "#a855c9", "#d8546b"]
+COMPETITOR_PALETTE = ["#6b6f76", "#494d54", "#9a9ea5", "#2f3237", "#c7cad0"]
 
 
 def display_name(name: str) -> str:
-    return PORTFOLIO_DISPLAY.get(name, name)
+    meta = PORTFOLIO_META.get(name)
+    return meta["DisplayName"] if meta and meta.get("DisplayName") else name
+
+
+def portfolio_owner(name: str) -> str:
+    meta = PORTFOLIO_META.get(name)
+    return meta["Owner"] if meta and meta.get("Owner") else "Competitor"
+
+
+def portfolio_provider(name: str) -> str:
+    meta = PORTFOLIO_META.get(name)
+    return meta["Provider"] if meta and meta.get("Provider") else display_name(name)
 
 
 def portfolio_color(name: str) -> str:
-    return PORTFOLIO_COLORS.get(name, "#888888")
+    owner = portfolio_owner(name)
+    palette = MOBIUS_PALETTE if owner == "Mobius" else COMPETITOR_PALETTE
+    same_owner = [n for n in PORTFOLIOS if portfolio_owner(n) == owner]
+    idx = same_owner.index(name) if name in same_owner else 0
+    return palette[idx % len(palette)]
+
+
+def providers_label(names, owner: str = "Competitor") -> str:
+    """Comma-joined, de-duplicated Provider names for whichever of `names` have the given Owner -
+    used to build section captions/PDF headers dynamically instead of hardcoding 'Aspen Advisers
+    UK'. Returns '' if none of `names` match that owner."""
+    seen = []
+    for n in names:
+        if portfolio_owner(n) == owner:
+            p = portfolio_provider(n)
+            if p not in seen:
+                seen.append(p)
+    return ", ".join(seen)
 
 
 def _hex_to_rgba(hex_color: str, alpha: float) -> str:
@@ -72,11 +96,28 @@ def _hex_to_rgba(hex_color: str, alpha: float) -> str:
     return f"rgba({r},{g},{b},{alpha})"
 
 
+def similar_exposure(name_a: str, name_b: str, tolerance: float = 0.05) -> bool:
+    """Whether two portfolios' asset-class weights are close enough to call 'the same underlying
+    exposure' - e.g. Original vs Alternative differ by a percentage point or two per asset class
+    (rounding noise in the FNZ 'Same Index' extraction), not a real allocation difference, whereas
+    a genuinely different competitor's fund typically differs by tens of percentage points.
+    Measured as total variation distance (half the sum of absolute weight differences, 0-1) against
+    `tolerance` - default 5%, i.e. up to ~2.5 percentage points of total drift is still 'the same'."""
+    wa, wb = asset_class_weights(name_a), asset_class_weights(name_b)
+    all_classes = wa.index.union(wb.index)
+    ra = wa.reindex(all_classes, fill_value=0.0)
+    rb = wb.reindex(all_classes, fill_value=0.0)
+    return (ra - rb).abs().sum() / 2 <= tolerance
+
+
 def ordered_names(names) -> list:
-    """Accumulation pair first (Aspen Growth Passive Plus, Mobius Alternative), then the decumulation pair
-    (Aspen Four Seasons, Mobius Better), regardless of sidebar selection order."""
-    order = ["Original", "Alternative", "Four Seasons", "Better"]
-    return [n for n in order if n in names] + [n for n in names if n not in order]
+    """De-duplicates while preserving whatever order the caller/sidebar selection supplied -
+    portfolios are no longer assumed to be one of a fixed set of 4 names."""
+    seen = []
+    for n in names:
+        if n not in seen:
+            seen.append(n)
+    return seen
 
 
 def save_portfolios_to_csv(portfolios_dict: dict, path=HOLDINGS_CSV) -> None:
@@ -97,6 +138,14 @@ def save_asset_map_to_csv(ac_dict: dict, path=ASSET_MAP_CSV) -> None:
     pd.DataFrame(rows).to_csv(path, index=False)
 
 
+def save_portfolio_meta_to_csv(meta_dict: dict, path=PORTFOLIO_META_CSV) -> None:
+    """Writes the full current (possibly session-extended) PORTFOLIO_META dict back to its sheet."""
+    rows = [{"Portfolio": name, "DisplayName": m.get("DisplayName", name),
+             "Owner": m.get("Owner", "Competitor"), "Provider": m.get("Provider", name)}
+            for name, m in meta_dict.items()]
+    pd.DataFrame(rows).to_csv(path, index=False)
+
+
 def historical_stats(name, asset_df):
     """Deterministic annualised return & volatility from the portfolio's own historical monthly
     returns (not a Monte Carlo average) - matches how the previous model's summary block computed
@@ -109,30 +158,18 @@ def historical_stats(name, asset_df):
     return cagr, vol
 
 
-def downside_stats(name, asset_df):
-    """Max DD (single worst peak-to-trough drawdown), Average DD (mean of the running drawdown
-    series - a 'typical' rather than worst-case figure), and CVaR at monthly and rolling-12m
-    horizons (average of the return series' own worst 5% tail) - same definitions used in the
-    standalone Better v4 workbook, added here so the in-app PDF export carries them too."""
+def portfolio_data_period(name, asset_df) -> str:
+    """The actual first-to-last month of usable history behind THIS portfolio's own figures -
+    narrower than the sidebar's historical-window slider whenever the portfolio's own holdings
+    don't cover the full window (e.g. Mobius Better's holdings only overlap from 2001), since
+    weighted_monthly_returns/dropna() already restricts to the common overlap across its holdings.
+    Every portfolio can have a different period, which is why this is shown per-row, not once."""
     weights = asset_class_weights(name)
     fee = weighted_avg_fee(name)
     monthly = weighted_monthly_returns(weights, fee, asset_df, label=name).dropna()
-
-    dd, worst_dd, dd_series = 0.0, 0.0, []
-    for r in monthly.to_numpy():
-        dd = min(0.0, (1 + dd) * (1 + r) - 1)
-        worst_dd = min(worst_dd, dd)
-        dd_series.append(dd)
-    avg_dd = float(np.mean(dd_series))
-
-    def cvar(series):
-        s = pd.Series(series).dropna()
-        threshold = np.percentile(s, 5)
-        tail = s[s < threshold]
-        return float(tail.mean()) if len(tail) else float(threshold)
-
-    rolling_12m = monthly.rolling(12).apply(lambda x: np.prod(1 + x) - 1, raw=True).dropna()
-    return dict(maxdd=worst_dd, avgdd=avg_dd, cvar_m=cvar(monthly), cvar_a=cvar(rolling_12m))
+    if monthly.empty:
+        return "n/a"
+    return f"{monthly.index.min():%Y-%m} to {monthly.index.max():%Y-%m}"
 
 
 def compute_irr(hist_df: pd.DataFrame) -> float:
@@ -254,8 +291,9 @@ def _pdf_section_table(pdf, section_title, names, sim_results, profile_kwargs, a
     pdf.cell(0, 8, section_title, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.ln(1)
 
-    col_widths = [40, 24, 24, 24, 24, 22, 22]
-    headers = ["Portfolio", "Annualised perf.", "Volatility", "Prob. of ruin", "Cumulative", "IRR", "Fee"]
+    col_widths = [38, 24, 17, 19, 18, 16, 14, 30]
+    headers = ["Portfolio", "Annualised perf.", "Volatility", "Prob. of ruin", "Cumulative", "IRR", "Fee",
+               "Data period"]
     pdf.set_font("Helvetica", "B", 8)
     pdf.set_fill_color(230, 230, 230)
     for w, h in zip(col_widths, headers):
@@ -270,6 +308,7 @@ def _pdf_section_table(pdf, section_title, names, sim_results, profile_kwargs, a
         hist_df = historical_single_path(name, asset_df, cpi, ClientProfile(**profile_kwargs))
         cum_pct = (hist_df["PortfolioValue"].iloc[-1] / profile_kwargs["starting_pot"] - 1) * 100
         irr = compute_irr(hist_df)
+        period = portfolio_data_period(name, asset_df)
         r, g, b = (int(portfolio_color(name).lstrip("#")[i:i + 2], 16) for i in (0, 2, 4))
         pdf.set_text_color(r, g, b)
         pdf.cell(col_widths[0], 8, display_name(name), border=1)
@@ -280,6 +319,9 @@ def _pdf_section_table(pdf, section_title, names, sim_results, profile_kwargs, a
         pdf.cell(col_widths[4], 8, f"{cum_pct:+.1f}%", border=1)
         pdf.cell(col_widths[5], 8, f"{irr*100:.2f}%" if not np.isnan(irr) else "n/a", border=1)
         pdf.cell(col_widths[6], 8, f"{fee_pct:.2f}%", border=1)
+        pdf.set_font("Helvetica", "", 7)
+        pdf.cell(col_widths[7], 8, period, border=1)
+        pdf.set_font("Helvetica", "", 8)
         pdf.ln()
     pdf.ln(3)
 
@@ -310,19 +352,22 @@ def _pdf_section_table(pdf, section_title, names, sim_results, profile_kwargs, a
 def build_summary_pdf(accum_results: dict, decum_results: dict, accum_profile_kwargs: dict,
                        decum_profile_kwargs: dict, asset_df, cpi, age: int, pot: float,
                        spend: float, horizon: int, wr: float) -> bytes:
-    """One-page client-facing takeaway covering both the Accumulation (Aspen Growth Passive Plus vs Mobius
-    Alternative) and Decumulation (Aspen Four Seasons vs Mobius Better) comparisons, as a PDF an
-    adviser can hand over or attach to an email after the meeting."""
+    """One-page client-facing takeaway covering both the Accumulation and Decumulation comparisons
+    currently selected in the sidebar, as a PDF an adviser can hand over or attach to an email
+    after the meeting."""
     pdf = FPDF(orientation="P", unit="mm", format="A4")
     pdf.set_auto_page_break(auto=True, margin=15)
     pdf.add_page()
+
+    all_names = list(accum_results.keys()) + [n for n in decum_results if n not in accum_results]
+    prepared_for = providers_label(all_names, owner="Competitor") or "Mobius Life"
 
     pdf.set_font("Helvetica", "B", 18)
     pdf.set_text_color(20, 20, 20)
     pdf.cell(0, 10, "Mobius Wealth - Accumulation & Decumulation Comparison", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.set_font("Helvetica", "", 11)
     pdf.set_text_color(90, 90, 90)
-    pdf.cell(0, 7, "Prepared for Aspen Advisers UK", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.cell(0, 7, f"Prepared for {prepared_for}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.ln(2)
 
     pdf.set_font("Helvetica", "", 10)
@@ -339,23 +384,31 @@ def build_summary_pdf(accum_results: dict, decum_results: dict, accum_profile_kw
     _pdf_section_table(pdf, "Decumulation (with withdrawals)", list(decum_results.keys()), decum_results,
                         decum_profile_kwargs, asset_df, cpi)
 
-    if "Original" in accum_results and "Alternative" in accum_results:
-        base_s = accum_results["Original"].summary()
-        alt_s = accum_results["Alternative"].summary()
-        legacy_gain = alt_s["Median legacy"] - base_s["Median legacy"]
-        fee_orig = weighted_avg_fee("Original") * 100
-        fee_alt = weighted_avg_fee("Alternative") * 100
+    if len(accum_results) == 2:
+        a, b = accum_results.keys()
+        same_exposure = similar_exposure(a, b)
+        s_a, s_b = accum_results[a].summary(), accum_results[b].summary()
+        legacy_gain = s_b["Median legacy"] - s_a["Median legacy"]
+        fee_a, fee_b = weighted_avg_fee(a) * 100, weighted_avg_fee(b) * 100
         legacy_phrase = (
             f"grows to GBP {legacy_gain:,.0f} more" if legacy_gain > 0
             else f"grows to GBP {abs(legacy_gain):,.0f} less"
         )
         pdf.set_font("Helvetica", "B", 11)
-        pdf.multi_cell(
-            0, 6,
-            f"Accumulation - same underlying market exposure, lower cost ({fee_orig:.2f}% vs "
-            f"{fee_alt:.2f}% pa): Mobius Alternative {legacy_phrase} than Aspen Growth Passive Plus over the "
-            f"same horizon, for holdings that track essentially the same indices.",
-        )
+        if same_exposure:
+            pdf.multi_cell(
+                0, 6,
+                f"Accumulation - same underlying market exposure, different cost ({fee_a:.2f}% vs "
+                f"{fee_b:.2f}% pa): {display_name(b)} {legacy_phrase} than {display_name(a)} over the "
+                f"same horizon, for holdings that track essentially the same indices.",
+            )
+        else:
+            pdf.multi_cell(
+                0, 6,
+                f"Accumulation - {display_name(b)} {legacy_phrase} than {display_name(a)} over the same "
+                f"horizon (fee: {fee_a:.2f}% vs {fee_b:.2f}% pa). These two hold different underlying "
+                f"asset-class exposure, so this reflects cost AND market exposure, not cost alone.",
+            )
         pdf.ln(4)
 
     pdf.set_font("Helvetica", "I", 8)
@@ -371,10 +424,11 @@ def build_summary_pdf(accum_results: dict, decum_results: dict, accum_profile_kw
 
 st.title("Mobius Wealth — Accumulation & Decumulation Simulator")
 st.caption(
-    "For Aspen Advisers UK — Accumulation compares Aspen's own 'Growth Passive Plus' lineup "
-    "(Original) against Mobius's tax/cost-efficient Alternative lineup; Decumulation compares "
-    "Aspen's 'Four Seasons Fund' against a more diversified Mobius Better portfolio. Uses Bloomberg "
-    "data to 14 July 2026."
+    "Compare any registered portfolio - a competitor's fund, or another Mobius construction - "
+    "against Mobius's own: Accumulation tests growing the pot with no withdrawals, Decumulation "
+    "tests drawing an income from it. Pick which portfolios to compare in the sidebar. Defaults to "
+    "Aspen Advisers UK's own 'Growth Passive Plus' and 'Four Seasons Fund' lineups vs Mobius's "
+    "Alternative and Better. Uses Bloomberg data to 14 July 2026."
 )
 hero_container = st.container()
 with st.expander("New to this tool? Read this first"):
@@ -440,6 +494,10 @@ with st.expander("All assumptions — what's baked into these numbers"):
         "- Annuity rates: real, dated UK best-buy rates (Hargreaves Lansdown, 14–28 May 2026), "
         "**not** a personalised quote — actual quotes vary by provider, postcode and health.\n\n"
         "**Portfolio construction**\n"
+        "- This tool can compare Mobius against ANY registered portfolio - a different competitor's "
+        "fund, or another Mobius construction - via 'Add a new portfolio' in the sidebar's 'Edit "
+        "data' tab. The points below describe the four BUNDLED example portfolios specifically; a "
+        "newly-added portfolio carries whatever provenance you give it when you register it.\n"
         "- Every holding is mapped to the best-matching BROAD asset-class series (full history back "
         "to 1999/2000) rather than its own short fund history, because many individual fund series "
         "in the data are too short (some as little as 20 months) to bootstrap a 25+ year simulation "
@@ -538,28 +596,37 @@ with st.sidebar:
         view_mode = st.radio(
             "Which comparison do you want to see?",
             ["Both", "Accumulation only", "Decumulation only"],
-            help="Accumulation compares Aspen Growth Passive Plus vs Mobius Alternative (growing the pot, no "
-                 "withdrawals). Decumulation compares Aspen Four Seasons vs Mobius Better (spending "
-                 "from the pot). Pick one if you only need a single scenario for this conversation - "
-                 "'Both' recomputes and shows everything, which takes a little longer.",
+            help="Accumulation tests growing the pot with no withdrawals; Decumulation tests spending "
+                 "from it. Pick whichever portfolios to compare in each section below - pick one mode "
+                 "if you only need a single scenario for this conversation; 'Both' recomputes and shows "
+                 "everything, which takes a little longer.",
         )
         show_accum = view_mode in ("Both", "Accumulation only")
         show_decum = view_mode in ("Both", "Decumulation only")
 
         st.header("Portfolios to compare")
+        if show_accum:
+            accum_chosen = st.multiselect(
+                "Accumulation portfolios", list(PORTFOLIOS.keys()), default=["Original", "Alternative"],
+                format_func=display_name, key="accum_chosen",
+                help="Drives the Accumulation section (growing the pot, no withdrawals). Pick any "
+                     "registered portfolio here - a competitor's fund vs a Mobius one, or several at "
+                     "once - not just the two built-in defaults.",
+            )
+        else:
+            accum_chosen = []
+            st.caption("Not shown — set 'What to show' above to Accumulation or Both.")
+
         if show_decum:
             chosen = st.multiselect(
-                "Portfolios", list(PORTFOLIOS.keys()), default=["Four Seasons", "Better"],
+                "Decumulation portfolios", list(PORTFOLIOS.keys()), default=["Four Seasons", "Better"],
                 format_func=display_name,
-                help="Drives the decumulation charts/statistics below and the 'Detailed analysis' section "
-                     "further down. Defaults to the decumulation comparison (Aspen Four Seasons vs Mobius "
-                     "Better) - the Accumulation section above always shows Aspen Growth Passive Plus vs Mobius "
-                     "Alternative regardless of this selection.",
+                help="Drives the Decumulation section (spending from the pot) and the 'Detailed "
+                     "analysis' section further down. Pick any registered portfolio here.",
             )
         else:
             chosen = []
-            st.caption("Not shown — set 'What to show' above to Decumulation or Both to compare "
-                       "Aspen Four Seasons vs Mobius Better.")
+            st.caption("Not shown — set 'What to show' above to Decumulation or Both.")
 
     with tab_data:
         with st.expander("📤 Add new asset-class return data"):
@@ -594,6 +661,40 @@ with st.sidebar:
                             st.success("Saved - available in future sessions too.")
                 except Exception as e:
                     st.error(f"Couldn't read this file: {e}")
+
+        with st.expander("➕ Add a new portfolio (e.g. another provider's fund)"):
+            st.caption(
+                "Register a brand-new portfolio - a different competitor's fund, or another Mobius "
+                "construction - so it shows up everywhere (labels, colours, section titles, PDF export) "
+                "exactly like the built-in ones, with no code changes. It starts with zero holdings; add "
+                "rows to it in 'Edit portfolio holdings & fees' below, then pick it in 'Portfolios to "
+                "compare' in the Client tab."
+            )
+            new_name = st.text_input("Internal name (must be unique)", key="new_portfolio_name",
+                                      placeholder="e.g. Legal & General PMC")
+            new_display = st.text_input("Display name (shown throughout the app)",
+                                         key="new_portfolio_display", placeholder="e.g. L&G Multi-Asset Fund")
+            new_owner = st.radio("Whose fund is this?", ["Competitor", "Mobius"], key="new_portfolio_owner",
+                                  horizontal=True,
+                                  help="Drives the colour scheme - Mobius portfolios get the warm brand "
+                                       "palette, everyone else's get neutral greys.")
+            new_provider = st.text_input("Provider / fund house name (used in section captions and the PDF)",
+                                          key="new_portfolio_provider", placeholder="e.g. Legal & General")
+            if st.button("Create portfolio", key="create_new_portfolio"):
+                if not new_name.strip():
+                    st.error("Give the portfolio a name first.")
+                elif new_name in PORTFOLIOS:
+                    st.error(f"'{new_name}' already exists - pick a different name or edit it below.")
+                else:
+                    PORTFOLIOS[new_name] = []
+                    PORTFOLIO_META[new_name] = {
+                        "DisplayName": new_display.strip() or new_name,
+                        "Owner": new_owner,
+                        "Provider": new_provider.strip() or (new_display.strip() or new_name),
+                    }
+                    st.session_state["edit_portfolio_name"] = new_name
+                    st.success(f"Created '{new_name}' - add its holdings below, then save both to make "
+                               "it the default for future sessions too.")
 
         with st.expander("✏️ Edit portfolio holdings & fees"):
             st.caption(
@@ -630,6 +731,10 @@ with st.sidebar:
             )
             if st.button(f"💾 Save {display_name(edit_name)} as new default", key=f"save_{edit_name}"):
                 save_portfolios_to_csv(PORTFOLIOS)
+                if edit_name not in PORTFOLIO_META:
+                    PORTFOLIO_META[edit_name] = {"DisplayName": edit_name, "Owner": "Competitor",
+                                                  "Provider": edit_name}
+                save_portfolio_meta_to_csv(PORTFOLIO_META)
                 st.success(f"Saved - {display_name(edit_name)} is now the default for future sessions too.")
 
     with tab_advanced:
@@ -772,11 +877,10 @@ if cma_blend > 0:
     cma_shift_table = cma_mod.cma_shifts(asset_df, AC)
     asset_df = cma_mod.apply_cma_blend(asset_df, AC, cma_blend)
 
-# Accumulation pair (Aspen Growth Passive Plus vs Mobius Alternative) always runs with NO withdrawals - a
-# separate, fixed comparison from the decumulation multiselect below, since accumulation is about
-# pure growth, not spending. Guardrails/tax are moot with zero spend, so left off regardless of the
-# sidebar toggles (which apply to decumulation only).
-ACCUM_NAMES = ["Original", "Alternative"]
+# Accumulation portfolios always run with NO withdrawals - a separate comparison from the
+# decumulation multiselect below, since accumulation is about pure growth, not spending.
+# Guardrails/tax are moot with zero spend, so left off regardless of the sidebar toggles (which
+# apply to decumulation only). accum_chosen can be ANY registered portfolio(s), not a fixed pair.
 accum_profile_kwargs = dict(
     starting_age=age, horizon_years=horizon, starting_pot=float(pot), initial_annual_spend=0.0,
     guardrails=False, guardrail_band=band, guardrail_cut=cut, guardrail_raise=raise_,
@@ -787,7 +891,7 @@ accum_profile_kwargs = dict(
 )
 accum_results = {}
 if show_accum:
-    for name in ACCUM_NAMES:
+    for name in accum_chosen:
         profile = ClientProfile(**accum_profile_kwargs)
         accum_results[name] = run_simulation(name, asset_df, cpi, profile, method=method, n_sims=n_sims,
                                               block_mean=block_mean, seed=seed)
@@ -806,74 +910,82 @@ for name in chosen:
 
 # ACCUMULATION section - the 5-second takeaway, filled into the container declared right under the
 # title so it renders at the TOP of the page even though it depends on the sidebar inputs computed
-# above. Always Aspen Growth Passive Plus vs Mobius Alternative, growing the pot with no withdrawals - matches
-# the previous Mobius model's own accumulation-style summary (compound return / volatility / prob of
-# ruin / cumulative performance chart), not the decumulation multiselect below.
+# above. accum_chosen can be any registered portfolio(s), not a fixed pair - the "cost difference
+# alone" narrative/chart below only applies when exactly two are picked AND they share the same
+# underlying asset-class exposure (the case the tool was originally built for: Aspen vs Mobius
+# holding the same indices at different fees); anything else just gets the plain comparison cards.
 if show_accum:
     with hero_container:
+        accum_title = (f"Accumulation — {' vs '.join(display_name(n) for n in accum_chosen)}"
+                        if accum_chosen else "Accumulation")
         render_comparison_section(
-            "Accumulation — Aspen Growth Passive Plus vs Mobius Alternative",
+            accum_title,
             "No withdrawals: growing the pot from today until the horizon ends. Probability of ruin is "
             "included for consistency but is trivially ~0% here since nothing is being withdrawn - "
             "volatility, annualised performance and cumulative performance are the metrics that matter "
             "for this comparison.",
-            ACCUM_NAMES, accum_results, accum_profile_kwargs, asset_df, cpi,
+            accum_chosen, accum_results, accum_profile_kwargs, asset_df, cpi,
         )
 
-        base_s = accum_results["Original"].summary()
-        alt_s = accum_results["Alternative"].summary()
-        legacy_gain = alt_s["Median legacy"] - base_s["Median legacy"]
-        fee_orig = weighted_avg_fee("Original") * 100
-        fee_alt = weighted_avg_fee("Alternative") * 100
-        legacy_phrase = (
-            f"**grows to £{legacy_gain:,.0f} more**" if legacy_gain > 0
-            else f"**grows to £{abs(legacy_gain):,.0f} less**"
-        )
-        st.success(
-            f"**Same underlying market exposure, lower cost** ({fee_orig:.2f}% → {fee_alt:.2f}% pa): over "
-            f"{horizon} years, Mobius Alternative {legacy_phrase} than Aspen Growth Passive Plus, for holdings that "
-            "track essentially the same indices."
-        )
+        if len(accum_chosen) == 2:
+            a, b = accum_chosen
+            wa = asset_class_weights(a)
+            same_exposure = similar_exposure(a, b)
+            fee_a, fee_b = weighted_avg_fee(a) * 100, weighted_avg_fee(b) * 100
+            s_a, s_b = accum_results[a].summary(), accum_results[b].summary()
+            legacy_gain = s_b["Median legacy"] - s_a["Median legacy"]
+            legacy_phrase = (f"**grows to £{legacy_gain:,.0f} more**" if legacy_gain > 0
+                              else f"**grows to £{abs(legacy_gain):,.0f} less**")
 
-        # Isolates cost alone: BOTH lines use Aspen's own asset-class weights (the shared "same index"
-        # exposure the FNZ data confirms), so the only variable that differs is the fee - a clean,
-        # deterministic (no simulation noise) illustration of what the cost difference alone is worth.
-        st.markdown("**What that cost difference alone is worth, left untouched**")
-        shared_weights = asset_class_weights("Original")
-        fee_orig_frac = weighted_avg_fee("Original")
-        fee_alt_frac = weighted_avg_fee("Alternative")
-        monthly_orig = weighted_monthly_returns(shared_weights, fee_orig_frac, asset_df,
-                                                 label="fee_check_orig").dropna()
-        monthly_alt = weighted_monthly_returns(shared_weights, fee_alt_frac, asset_df,
-                                                label="fee_check_alt").dropna()
-        growth_orig = 1 + monthly_orig.mean()
-        growth_alt = 1 + monthly_alt.mean()
-        months = np.arange(horizon * 12 + 1)
-        val_orig = pot * growth_orig ** months
-        val_alt = pot * growth_alt ** months
-        years_axis = months / 12.0
-        fig_fee = go.Figure()
-        fig_fee.add_trace(go.Scatter(
-            x=years_axis, y=val_orig, name=display_name("Original"),
-            line=dict(color=portfolio_color("Original"), width=2, dash="dot"),
-        ))
-        fig_fee.add_trace(go.Scatter(
-            x=years_axis, y=val_alt, name=display_name("Alternative"), fill="tonexty",
-            fillcolor=_hex_to_rgba("#fab219", 0.20), line=dict(color=portfolio_color("Alternative"), width=3),
-        ))
-        fig_fee.update_layout(
-            xaxis_title="Year", yaxis_title="£", height=340,
-            margin=dict(l=10, r=10, t=10, b=10), legend=dict(orientation="h", y=-0.2),
-        )
-        st.plotly_chart(fig_fee, use_container_width=True)
-        fee_gap = val_alt[-1] - val_orig[-1]
-        st.caption(
-            f"Both lines hold the SAME asset-class exposure and the SAME average market growth "
-            f"({(growth_orig**12 - 1)*100:.2f}% pa gross assumption, held equal) - the only "
-            f"difference is Aspen's {fee_orig:.2f}% vs Mobius's {fee_alt:.2f}% pa charge. On a "
-            f"£{pot:,.0f} pot with no withdrawals, that alone is worth **£{fee_gap:,.0f}** after "
-            f"{horizon} years."
-        )
+            if same_exposure:
+                st.success(
+                    f"**Same underlying market exposure, different cost** ({fee_a:.2f}% vs {fee_b:.2f}% pa): "
+                    f"over {horizon} years, {display_name(b)} {legacy_phrase} than {display_name(a)}, for "
+                    "holdings that track essentially the same indices."
+                )
+
+                # Isolates cost alone: BOTH lines use the SAME asset-class weights (confirmed above), so
+                # the only variable that differs is the fee - a clean, deterministic (no simulation
+                # noise) illustration of what the cost difference alone is worth.
+                st.markdown("**What that cost difference alone is worth, left untouched**")
+                fee_a_frac, fee_b_frac = weighted_avg_fee(a), weighted_avg_fee(b)
+                monthly_a = weighted_monthly_returns(wa, fee_a_frac, asset_df, label="fee_check_a").dropna()
+                monthly_b = weighted_monthly_returns(wa, fee_b_frac, asset_df, label="fee_check_b").dropna()
+                growth_a = 1 + monthly_a.mean()
+                growth_b = 1 + monthly_b.mean()
+                months = np.arange(horizon * 12 + 1)
+                val_a = pot * growth_a ** months
+                val_b = pot * growth_b ** months
+                years_axis = months / 12.0
+                fig_fee = go.Figure()
+                fig_fee.add_trace(go.Scatter(
+                    x=years_axis, y=val_a, name=display_name(a),
+                    line=dict(color=portfolio_color(a), width=2, dash="dot"),
+                ))
+                fig_fee.add_trace(go.Scatter(
+                    x=years_axis, y=val_b, name=display_name(b), fill="tonexty",
+                    fillcolor=_hex_to_rgba(portfolio_color(b), 0.20), line=dict(color=portfolio_color(b), width=3),
+                ))
+                fig_fee.update_layout(
+                    xaxis_title="Year", yaxis_title="£", height=340,
+                    margin=dict(l=10, r=10, t=10, b=10), legend=dict(orientation="h", y=-0.2),
+                )
+                st.plotly_chart(fig_fee, use_container_width=True)
+                fee_gap = val_b[-1] - val_a[-1]
+                st.caption(
+                    f"Both lines hold the SAME asset-class exposure and the SAME average market growth "
+                    f"({(growth_a**12 - 1)*100:.2f}% pa gross assumption, held equal) - the only "
+                    f"difference is {display_name(a)}'s {fee_a:.2f}% vs {display_name(b)}'s {fee_b:.2f}% pa "
+                    f"charge. On a £{pot:,.0f} pot with no withdrawals, that alone is worth "
+                    f"**£{fee_gap:,.0f}** after {horizon} years."
+                )
+            else:
+                st.info(
+                    f"**{display_name(b)}** {legacy_phrase} than **{display_name(a)}** over {horizon} years "
+                    f"(fee: {fee_a:.2f}% vs {fee_b:.2f}% pa) - note these two hold DIFFERENT underlying "
+                    "asset-class exposure, so this reflects both the cost difference AND different market "
+                    "exposure, not cost alone."
+                )
         st.divider()
 
 # Plain-English recap of the current scenario - so anyone opening this tool (not just the person who
@@ -902,8 +1014,10 @@ if show_decum:
         )
     st.info(" ".join(_summary_bits))
 elif show_accum:
+    _accum_label = (', '.join(display_name(n) for n in accum_chosen) if accum_chosen
+                    else 'no portfolios (pick some in the sidebar)')
     _summary_bits = [
-        f"Comparing **Aspen Growth Passive Plus** vs **Mobius Alternative** for a **{age}-year-old** growing a "
+        f"Comparing **{_accum_label}** for a **{age}-year-old** growing a "
         f"**£{pot:,.0f}** pot over **{horizon} years** (no withdrawals)."
     ]
     if cma_blend > 0:
@@ -989,7 +1103,7 @@ st.caption(
 )
 _holdings_names = []
 if show_accum:
-    _holdings_names += ACCUM_NAMES
+    _holdings_names += ordered_names(accum_chosen)
 if show_decum:
     _holdings_names += [n for n in ordered_names(chosen) if n not in _holdings_names]
 if _holdings_names:
@@ -1011,7 +1125,7 @@ st.divider()
 if show_decum:
     if results:
         render_comparison_section(
-            "Decumulation — Aspen Four Seasons vs Mobius Better",
+            f"Decumulation — {' vs '.join(display_name(n) for n in ordered_names(results))}",
             "With withdrawals: the client spends from this pot every year, so probability of ruin is the "
             "headline risk metric here, alongside volatility, annualised performance and cumulative "
             "performance.",
