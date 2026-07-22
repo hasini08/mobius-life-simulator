@@ -104,8 +104,10 @@ EQUITY_CLASSES = {
 
 def scale_to_equity_weight(name, target_equity_weight):
     """Rescale a named portfolio's asset-class weight vector to hit a target TOTAL equity weight
-    (Global Equities + EM Equities combined), preserving the relative split within the equity
-    sleeve and within the non-equity sleeve. This replicates the previous model's equity-allocation
+    (all classes in EQUITY_CLASSES combined - covers both the generic "Global Equities"/"EM
+    Equities" labels and Better's own equity-strategy labels), preserving the relative split
+    within the equity sleeve and within the non-equity sleeve. This replicates the previous
+    model's equity-allocation
     sweep methodology (its pptx scanned equity weight 20-100% for each portfolio 'shape' to find
     where probability of ruin bottoms out) - `name` supplies the shape (e.g. Better's relative
     tilt toward REITs/credit/ILGs within its non-equity sleeve), `target_equity_weight` overrides

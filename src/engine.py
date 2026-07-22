@@ -611,8 +611,13 @@ def run_glide_path_simulation(portfolio_name, asset_df, cpi_series, profile: Cli
     else:
         eq_path = [start_equity_weight + (end_equity_weight - start_equity_weight) * y / (years - 1)
                    for y in range(years)]
+    # .dropna() is essential here - weighted_monthly_returns returns a series spanning asset_df's
+    # FULL date range, NaN wherever this portfolio's own holdings have no data yet (e.g. Better's
+    # 2001-2025 window sits inside a 1971-2026 asset_df). Without dropping these, common_idx below
+    # would include NaN months, the bootstrap could draw one, and 0 * NaN = NaN still propagates -
+    # silently poisoning that simulated path's pot to NaN for every subsequent year.
     year_series = [weighted_monthly_returns(scale_to_equity_weight(portfolio_name, eq_w), fee, asset_df,
-                                             label=portfolio_name) for eq_w in eq_path]
+                                             label=portfolio_name).dropna() for eq_w in eq_path]
 
     common_idx = year_series[0].index
     for s in year_series[1:]:
