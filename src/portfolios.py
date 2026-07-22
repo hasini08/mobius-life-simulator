@@ -94,7 +94,12 @@ def weighted_avg_fee(name):
     return df["FeeContribution"].sum() / df["Weight"].sum()
 
 
-EQUITY_CLASSES = {"Global Equities", "EM Equities"}
+EQUITY_CLASSES = {
+    "Global Equities", "EM Equities",
+    # Mobius Better labels its equity sleeve under its own strategy names rather than
+    # the generic "Global Equities"/"EM Equities" used by the Aspen portfolios.
+    "Eq Gbl DM Novum Mgd Vol", "Eq Gbl DM Quality Gross", "Eq EM Net",
+}
 
 
 def scale_to_equity_weight(name, target_equity_weight):

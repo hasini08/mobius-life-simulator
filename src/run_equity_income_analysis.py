@@ -10,7 +10,7 @@ import pandas as pd
 from engine import load_asset_returns, load_cpi, ClientProfile
 from equity_income import (
     load_equity_returns, load_share_metadata, rank_shares, evaluate_basket,
-    equal_weight_basket, share_correlation_matrix,
+    share_correlation_matrix, find_best_baskets,
 )
 
 pd.set_option("display.width", 120)
@@ -41,33 +41,29 @@ def main():
     print("=" * 78)
     print(share_correlation_matrix(equity_df).round(2).to_string())
 
-    safest = ranked.iloc[0]["Share"]
-    # pick the safest share from a DIFFERENT sector than the single safest share, so the demo
-    # basket actually diversifies rather than doubling up on the same factor exposure
-    safest_sector = ranked.iloc[0]["Sector"]
-    other_sector_rows = ranked[ranked["Sector"] != safest_sector]
-    partner = other_sector_rows.iloc[0]["Share"]
-    basket_tickers = [safest, partner]
-    weights = equal_weight_basket(basket_tickers)
+    print()
+    print("=" * 78)
+    print("TASK 14 - systematic basket search (every 3-share equal-weight combination, ranked by")
+    print("actual probability of ruin - not just a hand-picked pair)")
+    print("=" * 78)
+    top_baskets = find_best_baskets(equity_df, cpi, profile, basket_size=3, top_n=5)
+    print(top_baskets.to_string(index=False))
+
+    best_basket = top_baskets.iloc[0]["Basket"]
+    best_tickers = best_basket.split(" + ")
+    weights = {t: 1.0 / len(best_tickers) for t in best_tickers}
 
     print()
     print("=" * 78)
-    print(f"TASK 14/15 - equal-weight basket of the 2 safest, differently-sectored shares: {basket_tickers}")
+    print(f"TASK 16 - best basket found ({best_basket}), compared across 3 rebalancing approaches")
     print("=" * 78)
-    res, dd = evaluate_basket("Demo Basket (constant-mix)", weights, equity_df, cpi, profile)
-    s = res.summary()
-    print(f"Probability of ruin: {s['Probability of ruin']:.2%}   Median legacy: £{s['Median legacy']:,.0f}")
-    print(f"Max DD: {dd['maxdd']:.2%}   Average DD: {dd['avgdd']:.2%}   CVaR 95 Mthly: {dd['cvar_m']:.2%}")
-
-    print()
-    print("=" * 78)
-    print("TASK 16 - same basket, buy-and-hold (no rebalancing) instead of constant-mix")
-    print("=" * 78)
-    res_bh, dd_bh = evaluate_basket("Demo Basket (buy-and-hold)", weights, equity_df, cpi, profile,
-                                     buy_and_hold=True)
-    s_bh = res_bh.summary()
-    print(f"Probability of ruin: {s_bh['Probability of ruin']:.2%}   Median legacy: £{s_bh['Median legacy']:,.0f}")
-    print(f"Max DD: {dd_bh['maxdd']:.2%}   Average DD: {dd_bh['avgdd']:.2%}   CVaR 95 Mthly: {dd_bh['cvar_m']:.2%}")
+    for label, mode in [("Constant-mix (rebalanced monthly)", "monthly"),
+                        ("Annual rebalance", "annual"),
+                        ("Buy-and-hold (never rebalanced)", "buy_and_hold")]:
+        res, dd = evaluate_basket(f"Best basket ({mode})", weights, equity_df, cpi, profile, rebalance=mode)
+        s = res.summary()
+        print(f"{label:36s} Prob. of ruin: {s['Probability of ruin']:6.2%}   "
+              f"Median legacy: £{s['Median legacy']:>10,.0f}   Max DD: {dd['maxdd']:7.2%}")
 
 
 if __name__ == "__main__":

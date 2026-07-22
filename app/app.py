@@ -40,6 +40,25 @@ import cma as cma_mod
 
 st.set_page_config(page_title="Mobius Wealth Decumulation Simulator", layout="wide")
 
+# Streamlit re-runs this ENTIRE script on every widget interaction, even ones unrelated to the
+# simulation (e.g. toggling a checkbox in the Advanced tab) - without caching, that means every
+# portfolio's Monte Carlo simulation reruns from scratch on every single click, which is slow
+# enough to feel laggy in a live demo. Caching by the exact inputs means an unrelated interaction
+# hits the cache (near-instant); only an actual change to age/pot/spend/method/data etc. triggers
+# a real recompute.
+@st.cache_data(show_spinner=False)
+def _cached_load_asset_returns(_mtime: float) -> pd.DataFrame:
+    """_mtime (the CSV's last-modified time, unused inside the function) is the cache key that
+    forces a reload whenever the file actually changes (e.g. via the 'save as new default' button
+    in the asset-upload expander) - without it, this would cache forever and never notice edits."""
+    return load_asset_returns()
+
+
+@st.cache_data(show_spinner=False)
+def _cached_run_simulation(name, asset_df, cpi, profile, method, n_sims, block_mean, seed):
+    return run_simulation(name, asset_df, cpi, profile, method=method, n_sims=n_sims,
+                           block_mean=block_mean, seed=seed)
+
 # Client-facing branding: internal simulation keys (used throughout src/portfolios.py and
 # src/engine.py) are left untouched - only how a portfolio is LABELLED and COLOURED in this app
 # changes, driven entirely by data/portfolio_meta.csv (DisplayName/Owner/Provider per portfolio),
@@ -283,6 +302,43 @@ def render_comparison_section(title, caption, names, sim_results, hist_profile_k
             "Mobius model), alongside the Monte Carlo-based statistics in the cards above."
         )
     return hist_paths
+
+
+def _holdings_column_config():
+    """Weight/OCF/FeeContribution are stored as raw fractions (0.325, 0.0007) - display them as
+    percentages everywhere so they read naturally, without changing the underlying data."""
+    return {
+        "Weight": st.column_config.NumberColumn("Weight", format="percent"),
+        "OCF": st.column_config.NumberColumn("OCF", format="percent"),
+        "FeeContribution": st.column_config.NumberColumn("Fee contribution", format="percent"),
+    }
+
+
+def render_holdings_section(names) -> None:
+    """'What each portfolio holds' for a single section (Accumulation or Decumulation) - kept as
+    its own reusable block so each section is self-contained (cards, chart, holdings all together)
+    instead of one shared holdings block sitting between the two sections."""
+    names = ordered_names(names)
+    st.subheader("What each portfolio holds")
+    st.caption(
+        "Full underlying holdings for every portfolio above, with each holding's asset-class "
+        "mapping and fee (OCF), plus the portfolio's overall weighted-average fee."
+    )
+    if not names:
+        st.caption("No portfolios selected.")
+        return
+    cols = st.columns(2) if len(names) > 1 else [st.container()]
+    for i, name in enumerate(names):
+        with cols[i % len(cols)]:
+            st.markdown(f"**{display_name(name)}** — weighted-average OCF: {weighted_avg_fee(name)*100:.3f}% pa")
+            st.dataframe(portfolio_summary(name), use_container_width=True,
+                         column_config=_holdings_column_config())
+    st.caption(
+        "Fund-level returns are mapped to broad asset-class index returns (Bloomberg data, 1999/2000-"
+        "2026) for the simulation, since several individual fund return histories are too short for a "
+        "reliable long-run bootstrap. Holdings, weights and fees can be edited live in the sidebar's "
+        "'Edit data' tab."
+    )
 
 
 def _pdf_section_table(pdf, section_title, names, sim_results, profile_kwargs, asset_df, cpi,
@@ -625,7 +681,8 @@ with st.expander("All assumptions — what's baked into these numbers"):
         "the shorter it gets — a handful of years isn't much to bootstrap 30-year outcomes from."
     )
 
-asset_df = load_asset_returns()
+_asset_returns_mtime = (portfolios_mod.DATA_DIR / "asset_class_returns.csv").stat().st_mtime
+asset_df = _cached_load_asset_returns(_asset_returns_mtime)
 cpi = load_cpi(asset_df)
 
 with st.sidebar:
@@ -791,9 +848,9 @@ with st.sidebar:
                 edit_df, num_rows="dynamic", key=f"editor_{edit_name}", use_container_width=True,
                 column_config={
                     "AssetClass": st.column_config.SelectboxColumn("Asset class", options=list(AC.keys())),
-                    "Weight": st.column_config.NumberColumn("Weight", format="%.4f", min_value=0.0,
-                                                              max_value=1.0, step=0.005),
-                    "OCF": st.column_config.NumberColumn("OCF (fee)", format="%.4f", min_value=0.0,
+                    "Weight": st.column_config.NumberColumn("Weight", format="percent", min_value=0.0,
+                                                              max_value=1.0, step=0.0001),
+                    "OCF": st.column_config.NumberColumn("OCF (fee)", format="percent", min_value=0.0,
                                                           max_value=0.05, step=0.0001),
                 },
             )
@@ -974,8 +1031,8 @@ accum_results = {}
 if show_accum:
     for name in accum_chosen:
         profile = ClientProfile(**accum_profile_kwargs)
-        accum_results[name] = run_simulation(name, asset_df, cpi, profile, method=method, n_sims=n_sims,
-                                              block_mean=block_mean, seed=seed)
+        accum_results[name] = _cached_run_simulation(name, asset_df, cpi, profile, method, n_sims,
+                                                      block_mean, seed)
 
 profile_kwargs = dict(
     starting_age=age, horizon_years=horizon, starting_pot=float(pot), initial_annual_spend=float(spend),
@@ -986,8 +1043,8 @@ profile_kwargs = dict(
 results = {}
 for name in chosen:
     profile = ClientProfile(**profile_kwargs)
-    results[name] = run_simulation(name, asset_df, cpi, profile, method=method, n_sims=n_sims,
-                                    block_mean=block_mean, seed=seed)
+    results[name] = _cached_run_simulation(name, asset_df, cpi, profile, method, n_sims,
+                                            block_mean, seed)
 
 # ACCUMULATION section - the 5-second takeaway, filled into the container declared right under the
 # title so it renders at the TOP of the page even though it depends on the sidebar inputs computed
@@ -1067,6 +1124,7 @@ if show_accum:
                     "asset-class exposure, so this reflects both the cost difference AND different market "
                     "exposure, not cost alone."
                 )
+        render_holdings_section(accum_chosen)
         st.divider()
 
 # Plain-English recap of the current scenario - so anyone opening this tool (not just the person who
@@ -1177,32 +1235,6 @@ if cma_blend > 0:
         "JPMorgan, BlackRock and others), https://monevator.com/investment-return-forecasts/."
     )
 
-st.subheader("What each portfolio holds")
-st.caption(
-    "Full underlying holdings for every portfolio currently in view, with each holding's asset-class "
-    "mapping and fee (OCF), plus the portfolio's overall weighted-average fee."
-)
-_holdings_names = []
-if show_accum:
-    _holdings_names += ordered_names(accum_chosen)
-if show_decum:
-    _holdings_names += [n for n in ordered_names(chosen) if n not in _holdings_names]
-if _holdings_names:
-    _holdings_cols = st.columns(2) if len(_holdings_names) > 1 else [st.container()]
-    for _i, _name in enumerate(_holdings_names):
-        with _holdings_cols[_i % len(_holdings_cols)]:
-            st.markdown(f"**{display_name(_name)}** — weighted-average OCF: {weighted_avg_fee(_name)*100:.3f}% pa")
-            st.dataframe(portfolio_summary(_name), use_container_width=True)
-    st.caption(
-        "Fund-level returns are mapped to broad asset-class index returns (Bloomberg data, 1999/2000-"
-        "2026) for the simulation, since several individual fund return histories are too short for a "
-        "reliable long-run bootstrap. Holdings, weights and fees can be edited live in the sidebar's "
-        "'Edit data' tab."
-    )
-else:
-    st.caption("Pick 'Both', 'Accumulation only' or 'Decumulation only' in the sidebar to see portfolio composition.")
-st.divider()
-
 if show_decum:
     if results:
         render_comparison_section(
@@ -1221,6 +1253,7 @@ if show_decum:
             help="A one-page takeaway covering both the Accumulation and Decumulation comparisons above - "
                  "hand it to the client or attach it to a follow-up email.",
         )
+        render_holdings_section(ordered_names(results))
         st.divider()
 
     st.subheader("Headline statistics")
@@ -1297,6 +1330,13 @@ if show_decum:
     fig2.update_layout(yaxis_title="Estate at end of horizon (£)", height=400, showlegend=False)
     st.plotly_chart(fig2, use_container_width=True)
 
+# Detailed analysis is available whenever ANYTHING is shown (not just Decumulation) - several tabs
+# below (Correlation, Historical check) are general-purpose, not decumulation-specific, so they
+# shouldn't disappear just because the sidebar is set to "Accumulation only". Tabs that genuinely
+# only make sense with a chosen decumulation portfolio (Mortality, Equity sweep, Sensitivity,
+# Glide path, Annuity) guard themselves on `chosen` being non-empty and show a short explanatory
+# message instead of silently doing nothing.
+if show_accum or show_decum:
     st.divider()
     show_detail = st.checkbox(
         "Show detailed analysis (correlations, mortality, historical check, sensitivities, glide path, annuity, holdings)",
@@ -1334,7 +1374,10 @@ if show_decum:
             st.plotly_chart(fig_corr, use_container_width=True)
 
         with tab_mort:
-            if use_mortality:
+            if use_mortality and not chosen:
+                st.info("Pick at least one Decumulation portfolio (or switch 'What to show' to "
+                        "Decumulation or Both) to see mortality-adjusted decumulation outcomes.")
+            elif use_mortality:
                 st.subheader("What the results look like factoring in life expectancy")
                 mortality_table = load_mortality_table()
                 qx_map = {"male": mortality_table["qx_male"], "female": mortality_table["qx_female"]}
@@ -1442,7 +1485,10 @@ if show_decum:
                 "Test different share-vs-safer-assets mixes (re-runs each portfolio 9 times - slower)",
                 value=False,
             )
-            if run_sweep and chosen:
+            if run_sweep and not chosen:
+                st.info("Pick at least one Decumulation portfolio (or switch 'What to show' to "
+                        "Decumulation or Both) to run this.")
+            elif run_sweep and chosen:
                 sweep_n_sims = st.select_slider(
                     "Simulations per sweep point", [300, 500, 1000, 2000], value=500, key="sweep_n_sims",
                     help="Kept lower than the main simulation count by default since 9 points x N portfolios "
@@ -1512,7 +1558,10 @@ if show_decum:
                 "Test how sensitive the plan is to spending level and guardrail settings (slower)",
                 value=False,
             )
-            if run_sensitivity and chosen:
+            if run_sensitivity and not chosen:
+                st.info("Pick at least one Decumulation portfolio (or switch 'What to show' to "
+                        "Decumulation or Both) to run this.")
+            elif run_sensitivity and chosen:
                 sens_n_sims = st.select_slider(
                     "Simulations per sensitivity point", [300, 500, 1000, 2000], value=500, key="sens_n_sims",
                 )
@@ -1637,7 +1686,10 @@ if show_decum:
                 "exposure down to a lower ending one."
             )
             run_glide = st.checkbox("Compare a fixed mix vs. gradually de-risking with age (slower)", value=False)
-            if run_glide and chosen:
+            if run_glide and not chosen:
+                st.info("Pick at least one Decumulation portfolio (or switch 'What to show' to "
+                        "Decumulation or Both) to run this.")
+            elif run_glide and chosen:
                 glide_portfolio = st.selectbox("Portfolio", chosen, key="glide_portfolio", format_func=display_name)
                 glide_col1, glide_col2, glide_col3 = st.columns(3)
                 with glide_col1:
@@ -1697,7 +1749,10 @@ if show_decum:
                 "outcomes rather than just the raw horizon-end ruin probability."
             )
             run_annuity = st.checkbox("Compare annuitizing part of the pot vs. staying fully invested (slower)", value=False)
-            if run_annuity and chosen:
+            if run_annuity and not chosen:
+                st.info("Pick at least one Decumulation portfolio (or switch 'What to show' to "
+                        "Decumulation or Both) to run this.")
+            elif run_annuity and chosen:
                 from annuity import annuitize, annuity_rate, MIN_QUOTED_AGE, MAX_QUOTED_AGE
 
                 ann_col1, ann_col2, ann_col3, ann_col4 = st.columns(4)
@@ -1810,7 +1865,8 @@ if show_decum:
             with st.expander("Portfolio holdings & assumptions"):
                 for name in ordered_names(chosen):
                     st.markdown(f"**{display_name(name)}** — weighted-average OCF: {weighted_avg_fee(name)*100:.3f}% pa")
-                    st.dataframe(portfolio_summary(name), use_container_width=True)
+                    st.dataframe(portfolio_summary(name), use_container_width=True,
+                                 column_config=_holdings_column_config())
                 st.markdown(
                     "Fund-level returns are mapped to broad asset-class index returns (Bloomberg data, "
                     "1999/2000–2026) for the simulation, since several individual fund return histories are "
