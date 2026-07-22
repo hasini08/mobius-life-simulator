@@ -972,6 +972,13 @@ with st.sidebar:
             if joint_life:
                 partner_sex = st.selectbox("Partner's sex", ["female", "male"], format_func=str.title)
                 partner_age = st.number_input("Partner's starting age", 40, 90, age - 2)
+                st.caption(
+                    "This only extends how long the money needs to last - to whichever partner dies "
+                    "SECOND, not just this one - it does not add a second pot or income. Enter the "
+                    "'Starting pot' and 'Desired annual spend' above as the COUPLE'S COMBINED totals, "
+                    "not just this person's own figures, for this to reflect their real household "
+                    "position."
+                )
             st.caption(
                 "Survival odds come from the S4 table (CMI, UK pension-scheme member experience) rather "
                 "than general population statistics, since pension scheme members tend to live somewhat "
