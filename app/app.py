@@ -1432,20 +1432,37 @@ if show_accum or show_decum:
                 "between them); **0 (white)** means no relationship; **negative (dark blue)** means they tend to "
                 "move in opposite directions (the strongest diversification benefit)."
             )
+            # Scoped to the asset classes actually held by the currently selected portfolios, not
+            # every class ever registered across every portfolio (which has grown well past the
+            # original 11 as more portfolios with their own naming - e.g. Better's - were added,
+            # and would otherwise make this both a cluttered, hard-to-read grid and a stale claim
+            # about exactly how many classes it covers).
+            _corr_selected_classes = set()
+            for _n in list(accum_chosen) + list(chosen if show_decum else []):
+                _corr_selected_classes |= set(asset_class_weights(_n).index)
+            corr_full = asset_correlation_matrix(asset_df)
+            _corr_cols = [c for c in corr_full.columns if c in _corr_selected_classes] or list(corr_full.columns)
+            corr = corr_full.loc[_corr_cols, _corr_cols]
+
+            _reit_note = ""
+            if {"REITs", "Infrastructure", "Global Equities"}.issubset(set(corr.columns)):
+                _reit_note = (
+                    f" Notably, REITs and Infrastructure run ~"
+                    f"{corr.loc['REITs', 'Global Equities']:.2f}-{corr.loc['Infrastructure', 'Global Equities']:.2f} "
+                    "correlated with Global Equities here, so they add less true diversification than their "
+                    "labels might suggest."
+                )
             st.caption(
-                "Based on monthly returns across the 11 broad asset classes over the full history (1999/2000-"
-                "2026). Notably, REITs and Infrastructure run ~0.75-0.76 correlated with Global Equities here, so "
-                "they add less true diversification than their labels might suggest (see the 'Better' portfolio "
-                "note in the Instructions/README)."
+                f"Based on monthly returns across the {len(corr)} asset classes held by the portfolio(s) "
+                f"currently selected, over the full history (1999/2000-2026).{_reit_note}"
             )
-            corr = asset_correlation_matrix(asset_df)
             fig_corr = go.Figure(data=go.Heatmap(
                 z=corr.values, x=corr.columns.tolist(), y=corr.index.tolist(),
                 colorscale="RdBu", zmid=0, zmin=-1, zmax=1,
                 text=corr.round(2).values, texttemplate="%{text}", textfont=dict(size=10),
                 colorbar=dict(title="Correlation"),
             ))
-            fig_corr.update_layout(height=500, margin=dict(l=10, r=10, t=10, b=10))
+            fig_corr.update_layout(height=max(400, 32 * len(corr)), margin=dict(l=10, r=10, t=10, b=10))
             st.plotly_chart(fig_corr, use_container_width=True)
 
         with tab_mort:
