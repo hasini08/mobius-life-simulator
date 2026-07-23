@@ -612,8 +612,8 @@ st.caption(
     "Compare any registered portfolio - a competitor's fund, or another Mobius construction - "
     "against Mobius's own: Accumulation tests growing the pot with no withdrawals, Decumulation "
     "tests drawing an income from it. Pick which portfolios to compare in the sidebar. Defaults to "
-    "Aspen Advisers UK's own 'Growth Passive Plus' and 'Four Seasons Fund' lineups vs Mobius's "
-    "Alternative and Better. Uses Bloomberg data to 14 July 2026."
+    "an example competitor's fund lineups vs Mobius's Alternative and Better. Uses Bloomberg data "
+    "to 14 July 2026."
 )
 hero_container = st.container()
 with st.expander("New to this tool? Read this first"):
@@ -687,8 +687,8 @@ with st.expander("All assumptions — what's baked into these numbers"):
         "to 1999/2000) rather than its own short fund history, because many individual fund series "
         "in the data are too short (some as little as 20 months) to bootstrap a 25+ year simulation "
         "from directly.\n"
-        "- Aspen Growth Passive Plus vs Mobius Alternative largely hold the SAME underlying index exposure (the "
-        "FNZ data literally labels several pairs 'Same Index') — the difference being compared is "
+        "- Example Portfolio A vs Mobius Alternative largely hold the SAME underlying index exposure (the "
+        "source data literally labels several pairs 'Same Index') — the difference being compared is "
         "fee (AMC), not market return.\n"
         "- Four Seasons holdings/weights come from the FNZ data supplied 14 July 2026; a few holdings "
         "are mapped to 'Commodities' as the closest available proxy for gold/natural-resources "
@@ -1341,7 +1341,7 @@ if show_decum:
             "Download one-page summary (PDF)",
             data=build_summary_pdf(accum_results, results, accum_profile_kwargs, profile_kwargs, asset_df,
                                     cpi, age, pot, spend, horizon, wr),
-            file_name="Mobius_Wealth_vs_Aspen_Advisers_summary.pdf",
+            file_name="Mobius_Wealth_Example_Comparison_summary.pdf",
             mime="application/pdf",
             help="A one-page takeaway covering both the Accumulation and Decumulation comparisons above - "
                  "hand it to the client or attach it to a follow-up email.",
@@ -1588,8 +1588,8 @@ if show_accum or show_decum:
             )
             st.caption(
                 "Technical detail: rescales each chosen portfolio to hit a target TOTAL equity weight (all "
-                "of that portfolio's equity/growth holdings combined - e.g. Global + EM equities for Aspen's "
-                "funds, or Mobius Better's own quality/managed-vol/EM equity sleeves), preserving the relative "
+                "of that portfolio's equity/growth holdings combined - e.g. Global + EM equities for the "
+                "example portfolios, or Mobius Better's own quality/managed-vol/EM equity sleeves), preserving the relative "
                 "split within the equity sleeve and within the rest of the portfolio, then re-runs the full "
                 "simulation at each point."
             )
