@@ -191,7 +191,7 @@ def portfolio_data_period(name, asset_df) -> str:
     return f"{monthly.index.min():%Y-%m} to {monthly.index.max():%Y-%m}"
 
 
-def compute_irr(hist_df: pd.DataFrame) -> float:
+def compute_irr(hist_df: pd.DataFrame, spend_column: str = "Spend") -> float:
     """Money-weighted internal rate of return on the CLIENT's own cash-flow experience (matches the
     'IRR' line in the previous Mobius model's summary block) - different from 'Annualised performance'
     (CAGR), which only measures how the underlying investments grew and ignores cash flows in/out.
@@ -202,13 +202,19 @@ def compute_irr(hist_df: pd.DataFrame) -> float:
     plus whatever's left in the pot (the 'legacy') as one lump sum - since both the last withdrawal
     and the leftover balance represent value that ultimately flows to the client/their estate.
 
+    spend_column: "Spend" (default) is TOTAL income - includes State Pension/annuity on top of pot
+    withdrawals, since historical_single_path always folds those in regardless of the tax toggle.
+    Pass "Withdrawal" instead for a POT-ONLY IRR that isolates this portfolio's own investment
+    return - State Pension is a flat, guaranteed amount identical across every portfolio, so including
+    it inflates "investment return" for reasons that have nothing to do with portfolio quality.
+
     For a pure accumulation scenario (no withdrawals) this exactly equals the realised compound growth
     rate of THIS historical path - it can still read a little differently from the 'Annualised
     performance' card above, which uses the historical AVERAGE monthly return (the same input the
     Monte Carlo simulation draws on) rather than one specific realised sequence; the two are related
     but not identical measures."""
     values = hist_df["PortfolioValue"].to_numpy()
-    spends = hist_df["Spend"].to_numpy()
+    spends = hist_df[spend_column].to_numpy()
     if len(values) < 2:
         return float("nan")
     cash_flows = [-values[0]] + list(spends[1:-1]) + [spends[-1] + values[-1]]
@@ -227,11 +233,19 @@ def compute_irr(hist_df: pd.DataFrame) -> float:
         return float("nan")
 
 
-def render_comparison_section(title, caption, names, sim_results, hist_profile_kwargs, asset_df, cpi):
+def render_comparison_section(title, caption, names, sim_results, hist_profile_kwargs, asset_df, cpi,
+                                show_ruin: bool = True, show_pot_only_irr: bool = False):
     """Renders a row of metric cards (annualised performance, volatility, probability of ruin,
     cumulative performance) plus a cumulative-performance line chart (the actual historical sequence
     of returns, not a simulated fan) - the same style of summary the previous Mobius model showed for
     its portfolios. Used for both the Accumulation and Decumulation sections below.
+
+    show_ruin: Accumulation has no withdrawals, so probability of ruin is always ~0% there and not a
+    meaningful comparison point - the caller passes False to drop it entirely for that section.
+    show_pot_only_irr: Decumulation's IRR includes State Pension (see compute_irr) unless split out -
+    the caller passes True there to show both Total-income and Pot-only IRR side by side; Accumulation
+    never needs this since it has no State Pension in the first place (the two would be identical).
+
     Returns the historical single-path DataFrames, keyed by name, in case the caller wants them."""
     st.markdown(f"#### {title}")
     if caption:
@@ -247,13 +261,6 @@ def render_comparison_section(title, caption, names, sim_results, hist_profile_k
         end_val = hist_df["PortfolioValue"].iloc[-1]
         cum_pct = (end_val / start_val - 1) * 100
         irr = compute_irr(hist_df)
-        ruin_pct = s["Probability of ruin"] * 100
-        if ruin_pct < 10:
-            ruin_color = "#0ca30c"   # good
-        elif ruin_pct < 30:
-            ruin_color = "#c98500"   # warning (darkened from the standard warning hue for contrast on white)
-        else:
-            ruin_color = "#d03b3b"   # critical
         with col:
             with st.container(border=True):
                 st.markdown(
@@ -261,29 +268,52 @@ def render_comparison_section(title, caption, names, sim_results, hist_profile_k
                     f"font-size:1.05rem;'>{display_name(name)}</div>",
                     unsafe_allow_html=True,
                 )
-                st.markdown(
-                    "<div style='font-size:0.72rem; color:#898781; font-weight:600; "
-                    "text-transform:uppercase; letter-spacing:0.04em; margin-top:6px;'>"
-                    "Probability of ruin</div>"
-                    f"<div style='font-size:2.3rem; font-weight:800; color:{ruin_color}; "
-                    f"line-height:1.15;'>{ruin_pct:.1f}%</div>",
-                    unsafe_allow_html=True,
-                )
-                st.caption("Share of simulated futures where the pot hits £0 before the plan ends - "
-                           "the single most important number here.")
-                st.divider()
+                if show_ruin:
+                    ruin_pct = s["Probability of ruin"] * 100
+                    if ruin_pct < 10:
+                        ruin_color = "#0ca30c"   # good
+                    elif ruin_pct < 30:
+                        ruin_color = "#c98500"   # warning (darkened from the standard warning hue for contrast on white)
+                    else:
+                        ruin_color = "#d03b3b"   # critical
+                    st.markdown(
+                        "<div style='font-size:0.72rem; color:#898781; font-weight:600; "
+                        "text-transform:uppercase; letter-spacing:0.04em; margin-top:6px;'>"
+                        "Probability of ruin</div>"
+                        f"<div style='font-size:2.3rem; font-weight:800; color:{ruin_color}; "
+                        f"line-height:1.15;'>{ruin_pct:.1f}%</div>",
+                        unsafe_allow_html=True,
+                    )
+                    st.caption("Share of simulated futures where the pot hits £0 before the plan ends - "
+                               "the single most important number here.")
+                    st.divider()
                 st.metric("Annualised performance", f"{cagr*100:.2f}% pa",
                           help="Compound annual growth rate, from this portfolio's own historical monthly returns net of fees.")
                 st.metric("Volatility", f"{vol*100:.2f}% pa",
                           help="Annualised standard deviation of monthly returns - how bumpy the ride is.")
                 st.metric("Cumulative performance", f"{cum_pct:+.1f}%",
                           help="Total growth of the starting pot over the full historical horizon shown in the chart below.")
-                st.metric("IRR", f"{irr*100:.2f}% pa" if not np.isnan(irr) else "n/a",
-                          help="Money-weighted return on the client's own cash flows: starting pot out, each "
-                               "year's actual withdrawal in, and the final withdrawal plus whatever's left "
-                               "(the legacy) in as one lump sum, using this specific historical sequence. "
-                               "Related to, but not identical to, Annualised performance above (which uses "
-                               "the historical average return rather than one realised sequence).")
+                if show_pot_only_irr:
+                    irr_pot = compute_irr(hist_df, spend_column="Withdrawal")
+                    st.metric("Total-income IRR", f"{irr*100:.2f}% pa" if not np.isnan(irr) else "n/a",
+                              help="Money-weighted return on ALL cash the client receives: starting pot out, "
+                                   "each year's actual withdrawal PLUS State Pension in, and the final "
+                                   "withdrawal plus whatever's left (the legacy) in as one lump sum. "
+                                   "Includes State Pension - a flat, guaranteed amount identical regardless "
+                                   "of which portfolio is held, so this isn't a pure measure of investment "
+                                   "quality; see Pot-only IRR below for that.")
+                    st.metric("Pot-only IRR", f"{irr_pot*100:.2f}% pa" if not np.isnan(irr_pot) else "n/a",
+                              help="Same money-weighted calculation as Total-income IRR, but EXCLUDING State "
+                                   "Pension - isolating the return generated by this portfolio's own "
+                                   "investments. The fairer figure for comparing one portfolio against "
+                                   "another, since State Pension is the same regardless of which is held.")
+                else:
+                    st.metric("IRR", f"{irr*100:.2f}% pa" if not np.isnan(irr) else "n/a",
+                              help="Money-weighted return on the client's own cash flows: starting pot out, each "
+                                   "year's actual withdrawal in, and the final withdrawal plus whatever's left "
+                                   "(the legacy) in as one lump sum, using this specific historical sequence. "
+                                   "Related to, but not identical to, Annualised performance above (which uses "
+                                   "the historical average return rather than one realised sequence).")
     if names:
         fig = go.Figure()
         for name in names:
@@ -1079,11 +1109,12 @@ if show_accum:
                         if accum_chosen else "Accumulation")
         render_comparison_section(
             accum_title,
-            "No withdrawals: growing the pot from today until the horizon ends. Probability of ruin is "
-            "included for consistency but is trivially ~0% here since nothing is being withdrawn - "
-            "volatility, annualised performance and cumulative performance are the metrics that matter "
-            "for this comparison.",
+            "No withdrawals: growing the pot from today until the horizon ends. Probability of ruin isn't "
+            "shown here since it's always ~0% with nothing being withdrawn and not a meaningful comparison "
+            "point - volatility, annualised performance and cumulative performance are the metrics that "
+            "matter for this comparison.",
             accum_chosen, accum_results, accum_profile_kwargs, asset_df, cpi,
+            show_ruin=False,
         )
 
         if len(accum_chosen) == 2:
@@ -1286,6 +1317,7 @@ if show_decum:
             "headline risk metric here, alongside volatility, annualised performance and cumulative "
             "performance.",
             ordered_names(results), results, profile_kwargs, asset_df, cpi,
+            show_pot_only_irr=True,
         )
         st.download_button(
             "Download one-page summary (PDF)",
