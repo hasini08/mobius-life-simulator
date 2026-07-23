@@ -754,7 +754,7 @@ def historical_single_path(portfolio_name, asset_df, cpi_series, profile: Client
     real_spend = profile.initial_annual_spend
     cum_inflation = 1.0
     wr0 = profile.initial_annual_spend / profile.starting_pot
-    rows = [(idx[0] if len(idx) else start_date, pot, 0.0)]
+    rows = [(idx[0] if len(idx) else start_date, pot, 0.0, 0.0)]
     for y in range(profile.horizon_years):
         yr_idx = idx[y * 12:(y + 1) * 12]
         if len(yr_idx) == 0:
@@ -785,8 +785,10 @@ def historical_single_path(portfolio_name, asset_df, cpi_series, profile: Client
         guaranteed_nominal = sp_nominal + profile.annuity_income_nominal
         net_received = (float(tax.net_income(guaranteed_nominal + withdrawal)) if profile.apply_tax
                          else guaranteed_nominal + withdrawal)
-        rows.append((yr_idx[-1], pot, net_received))
-    return pd.DataFrame(rows, columns=["Date", "PortfolioValue", "Spend"])
+        # "Withdrawal" = pot-only cash flow (excludes State Pension/annuity) - lets a caller build an
+        # investment-only IRR alongside the total-income figure derived from "Spend".
+        rows.append((yr_idx[-1], pot, net_received, withdrawal))
+    return pd.DataFrame(rows, columns=["Date", "PortfolioValue", "Spend", "Withdrawal"])
 
 
 if __name__ == "__main__":
