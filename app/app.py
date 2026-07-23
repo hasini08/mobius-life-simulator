@@ -386,12 +386,21 @@ def _pdf_section_table(pdf, section_title, names, sim_results, profile_kwargs, a
 
     # Prob. of ruin is dropped for Accumulation (no withdrawals ever happen there, so it's always
     # ~0% and not a meaningful comparison point) but kept for Decumulation, where it's the headline
-    # risk metric - same distinction the live app's cards already make.
+    # risk metric - same distinction the live app's cards already make. Pot-only IRR is likewise
+    # only shown for Decumulation - for Accumulation the two figures are identical by construction
+    # (no withdrawals, no State Pension), so a second column would just repeat the first. Base
+    # widths are untouched from the Accumulation-only layout (total 137mm, well under the ~190mm
+    # page width) - the two extra Decumulation columns (19+14=33mm) are added on top, not carved
+    # out of the others, so the Accumulation table's column widths never change.
     col_widths = [38, 24, 17, 18, 16, 14, 30]
     headers = ["Portfolio", "Annualised perf.", "Volatility", "Cumulative", "IRR", "Fee", "Data period"]
     if show_ruin:
         col_widths.insert(3, 19)
         headers.insert(3, "Prob. of ruin")
+        irr_pos = headers.index("IRR")
+        headers[irr_pos] = "Total IRR"
+        col_widths.insert(irr_pos + 1, 14)
+        headers.insert(irr_pos + 1, "Pot IRR")
 
     pdf.set_font("Helvetica", "B", 8)
     pdf.set_fill_color(230, 230, 230)
@@ -407,6 +416,7 @@ def _pdf_section_table(pdf, section_title, names, sim_results, profile_kwargs, a
         hist_df = historical_single_path(name, asset_df, cpi, ClientProfile(**profile_kwargs))
         cum_pct = (hist_df["PortfolioValue"].iloc[-1] / profile_kwargs["starting_pot"] - 1) * 100
         irr = compute_irr(hist_df)
+        irr_pot = compute_irr(hist_df, spend_column="Withdrawal") if show_ruin else irr
         period = portfolio_data_period(name, asset_df)
         r, g, b = (int(portfolio_color(name).lstrip("#")[i:i + 2], 16) for i in (0, 2, 4))
         pdf.set_text_color(r, g, b)
@@ -419,6 +429,8 @@ def _pdf_section_table(pdf, section_title, names, sim_results, profile_kwargs, a
             pdf.cell(col_widths[col], 8, f"{s['Probability of ruin']*100:.1f}%", border=1); col += 1
         pdf.cell(col_widths[col], 8, f"{cum_pct:+.1f}%", border=1); col += 1
         pdf.cell(col_widths[col], 8, f"{irr*100:.2f}%" if not np.isnan(irr) else "n/a", border=1); col += 1
+        if show_ruin:
+            pdf.cell(col_widths[col], 8, f"{irr_pot*100:.2f}%" if not np.isnan(irr_pot) else "n/a", border=1); col += 1
         pdf.cell(col_widths[col], 8, f"{fee_pct:.2f}%", border=1); col += 1
         pdf.set_font("Helvetica", "", 7)
         pdf.cell(col_widths[col], 8, period, border=1)
@@ -469,7 +481,7 @@ def build_summary_pdf(accum_results: dict, decum_results: dict, accum_profile_kw
     pdf.set_font("Helvetica", "", 11)
     pdf.set_text_color(90, 90, 90)
     pdf.cell(0, 7, f"Prepared for {prepared_for}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-    pdf.ln(4)
+    pdf.ln(2)
 
     # "To last N years" is ambiguous on its own (last until when? guaranteed, or just targeted?) -
     # spelled out explicitly here as "the pot needs to last until age X without running out" so a
@@ -511,7 +523,7 @@ def build_summary_pdf(accum_results: dict, decum_results: dict, accum_profile_kw
                 f"horizon (fee: {fee_a:.2f}% vs {fee_b:.2f}% pa). These two hold different underlying "
                 f"asset-class exposure, so this reflects cost AND market exposure, not cost alone.",
             )
-        pdf.ln(4)
+        pdf.ln(2)
 
     # Decumulation: client context first (spend/withdrawal rate only apply once withdrawals start,
     # so this doesn't belong under Accumulation above), then table (Prob. of ruin kept - the
@@ -546,20 +558,17 @@ def build_summary_pdf(accum_results: dict, decum_results: dict, accum_profile_kw
             f"Decumulation - {display_name(b)} cuts probability of ruin by {ruin_diff_pp:.1f} "
             f"percentage points versus {display_name(a)}, and {legacy_phrase}, {vol_phrase}.",
         )
-        pdf.ln(4)
+        pdf.ln(2)
 
     pdf.set_font("Helvetica", "I", 8)
     pdf.set_text_color(120, 120, 120)
     pdf.multi_cell(
         0, 5,
-        "Source: Mobius Analysis. Past performance is not a reliable indicator of future performance. "
-        "The probability of ruin analysis is based on historical simulations and Monte Carlo modelling "
-        "using specific assumptions regarding returns, volatility, withdrawals and portfolio "
-        "construction. Results are illustrative only and should not be regarded as forecasts or "
-        "guarantees of future outcomes. Probability of ruin can vary materially under different "
-        "assumptions and market conditions. In addition, the portfolio comparisons shown may use "
-        "differing historical data periods and modelling inputs, which should be considered when "
-        "interpreting relative results. Generated by the Mobius Wealth Decumulation Simulator.",
+        "Source: Mobius Analysis. All data is simulated based upon historical data using Monte Carlo "
+        "simulation methodology. The Monte Carlo simulation is a mathematical technique that uses "
+        "random sampling to estimate the possible outcomes of a process or system. It's used to model "
+        "complex systems with inherent uncertainty, providing insight into how likely different "
+        "outcomes are. See attached Appendix for assumptions used.",
     )
     pdf.ln(2)
     pdf.multi_cell(
@@ -569,8 +578,17 @@ def build_summary_pdf(accum_results: dict, decum_results: dict, accum_profile_kw
         "withdrawals. As a result, these statistics reflect the strategy's underlying investment "
         "performance rather than cash-flow-driven declines in portfolio value.",
     )
+    pdf.ln(2)
+    pdf.multi_cell(
+        0, 5,
+        "Total IRR / Pot IRR (Decumulation table): Total IRR is the money-weighted return on all "
+        "cash received, including State Pension where applicable; Pot IRR excludes State Pension, "
+        "isolating the return generated by the portfolio's own investments. State Pension is a flat, "
+        "guaranteed amount identical regardless of which portfolio is held, so Pot IRR is the fairer "
+        "basis for comparing portfolios against each other.",
+    )
 
-    pdf.ln(4)
+    pdf.ln(2)
     pdf.set_font("Helvetica", "", 6)
     pdf.set_text_color(140, 140, 140)
     pdf.multi_cell(
