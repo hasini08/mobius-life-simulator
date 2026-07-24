@@ -40,11 +40,31 @@ DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 HOLDINGS_CSV = DATA_DIR / "portfolio_holdings.csv"
 ASSET_MAP_CSV = DATA_DIR / "asset_class_map.csv"
 PORTFOLIO_META_CSV = DATA_DIR / "portfolio_meta.csv"
+COMPARISON_GROUPS_CSV = DATA_DIR / "asset_class_comparison_groups.csv"
 
 
 def load_asset_class_map(path=ASSET_MAP_CSV) -> dict:
     df = pd.read_csv(path)
     return dict(zip(df["Label"], df["BloombergColumn"]))
+
+
+def load_comparison_groups(path=COMPARISON_GROUPS_CSV) -> dict:
+    """Reads the AssetClass -> ComparisonGroup crosswalk (its own small sheet, kept separate from
+    asset_class_map.csv since that one gets fully rewritten - Label/BloombergColumn only - by the
+    in-app asset-class uploader, which would silently drop any extra column bolted onto it).
+
+    Needed because portfolios built from different source data label the same underlying exposure
+    differently - e.g. Four Seasons' "Global Equities" vs Better's "Eq Gbl DM Novum Mgd Vol" / "Eq
+    Gbl DM Quality Gross" - so a direct AssetClass-to-AssetClass comparison between them never
+    lines up even when the actual market exposure is similar. This groups both onto a shared label
+    so allocations can be compared like-for-like.
+
+    "Alternatives (hedge funds)" (Better's Hedge Fund Credit Suisse / HF Trend, ~15% of Better) has
+    no equivalent in Four Seasons/Original/Alternative at all, and is deliberately NOT folded into
+    an unrelated bucket (e.g. Commodities) - that would misrepresent both portfolios. It's kept as
+    its own group so the comparison honestly shows 0% there for portfolios that don't hold it."""
+    df = pd.read_csv(path)
+    return dict(zip(df["AssetClass"], df["ComparisonGroup"]))
 
 
 def load_portfolios(path=HOLDINGS_CSV) -> dict:
@@ -74,6 +94,7 @@ def load_portfolio_meta(path=PORTFOLIO_META_CSV) -> dict:
 AC = load_asset_class_map()
 PORTFOLIOS = load_portfolios()
 PORTFOLIO_META = load_portfolio_meta()
+COMPARISON_GROUPS = load_comparison_groups()
 
 
 def portfolio_summary(name):
@@ -87,6 +108,18 @@ def asset_class_weights(name):
     """Aggregate a portfolio's holdings into net asset-class weights (sums to 1.0)."""
     df = portfolio_summary(name)
     return df.groupby("AssetClass")["Weight"].sum()
+
+
+def comparison_group_weights(name):
+    """Like asset_class_weights, but rolled up onto the shared ComparisonGroup labels (see
+    load_comparison_groups) instead of each portfolio's own native AssetClass names - lets
+    portfolios built from different source data (e.g. Four Seasons vs Better) be compared
+    like-for-like even though neither their fund names nor their raw AssetClass labels overlap.
+    An AssetClass with no entry in the crosswalk (e.g. a class added via the in-app uploader)
+    falls back to its own name as its group, rather than being dropped."""
+    weights = asset_class_weights(name)
+    groups = weights.index.map(lambda c: COMPARISON_GROUPS.get(c, c))
+    return weights.groupby(groups).sum()
 
 
 def weighted_avg_fee(name):

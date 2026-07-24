@@ -1,0 +1,24 @@
+AssetClass,ComparisonGroup
+Cash,Cash
+Commodities,Commodities
+Commod,Commodities
+EM Equities,EM Equities
+Eq EM Net,EM Equities
+Global Equities,Global Equities
+Eq Gbl DM Novum Mgd Vol,Global Equities
+Eq Gbl DM Quality Gross,Global Equities
+Global Bonds,Global Bonds
+Global Agg Bonds,Global Bonds
+EM Corp Bond,Global Bonds
+US HY Corp Bond,Global Bonds
+US ABS,Global Bonds
+Infrastructure,Infrastructure
+REITs,REITs
+US Prop REITS,REITs
+UK Gilts All Stocks,UK Gilts All Stocks
+UK Gilts 15yr+,UK Gilts 15yr+
+UK Gilts <5yr,UK Gilts <5yr
+UK Index-Linked Gilts,UK Index-Linked Gilts
+US Treasuries 20yr+,US Treasuries 20yr+
+Hedge Fund Credit Suisse,Alternatives (hedge funds)
+HF Trend,Alternatives (hedge funds)

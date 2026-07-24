@@ -31,7 +31,8 @@ from engine import (
 )
 import portfolios as portfolios_mod
 from portfolios import (
-    PORTFOLIOS, PORTFOLIO_META, portfolio_summary, weighted_avg_fee, asset_class_weights, AC,
+    PORTFOLIOS, PORTFOLIO_META, portfolio_summary, weighted_avg_fee, asset_class_weights,
+    comparison_group_weights, AC,
     HOLDINGS_CSV, ASSET_MAP_CSV, PORTFOLIO_META_CSV,
 )
 from mortality import load_mortality_table, survival_curve, joint_survival_curve, life_expectancy
@@ -344,19 +345,184 @@ def _holdings_column_config():
     }
 
 
+def bucket_weights_within(name, bucket) -> pd.Series:
+    """Native AssetClass weights for `name` restricted to holdings that fall in the shared
+    comparison `bucket`, rescaled to sum to 1 - i.e. 'what if this portfolio held only this
+    slice, on its own, at full weight'. Used to isolate one asset class's own return path from
+    a portfolio's blended holdings (e.g. Better's Global Bonds bucket blends Global Agg Bonds,
+    US ABS, US HY Corp Bond and EM Corp Bond - this reconstructs just that blend)."""
+    weights = asset_class_weights(name)
+    groups = weights.index.map(lambda c: portfolios_mod.COMPARISON_GROUPS.get(c, c))
+    in_bucket = weights[groups == bucket]
+    return in_bucket / in_bucket.sum()
+
+
+def bucket_monthly_returns(name, bucket, asset_df) -> pd.Series:
+    """Monthly return series for just one asset-class bucket within a portfolio, fee-free (fees are
+    a whole-portfolio concept, not meaningfully split per asset class) - the growth of £1 in that
+    slice alone, not blended with the rest of the portfolio's holdings."""
+    w = bucket_weights_within(name, bucket)
+    return weighted_monthly_returns(w, 0.0, asset_df, label=f"{name}-{bucket}").dropna()
+
+
+def render_fs_better_asset_class_comparison(asset_df) -> None:
+    """Dedicated Four Seasons vs Better breakdown by shared asset-class bucket - fixed to this pair
+    specifically (not generalised to whichever portfolios happen to be selected elsewhere), covering:
+    allocation by bucket, which underlying funds/holdings make up each bucket, how each bucket's own
+    market exposure has evolved in isolation, and a buy-and-hold illustration of how that split would
+    have built up an example pot - kept clearly separate from the actual withdrawal-adjusted
+    simulation shown elsewhere on this page."""
+    names = ["Four Seasons", "Better"]
+    if not all(n in PORTFOLIOS for n in names):
+        return
+
+    st.subheader("Four Seasons vs Better, by asset class")
+    st.caption(
+        "Four Seasons' and Better's own holdings use different naming schemes for similar underlying "
+        "exposure (e.g. Four Seasons' 'Global Equities' vs Better's 'Eq Gbl DM Novum Mgd Vol' / 'Eq "
+        "Gbl DM Quality Gross'), so this groups both onto the same shared buckets first - allocation, "
+        "then the funds behind each bucket, then how each bucket's own market exposure has moved "
+        "historically, before the actual pot outcome further down."
+    )
+
+    group_weights = {name: comparison_group_weights(name) for name in names}
+    all_groups = sorted(set().union(*(w.index for w in group_weights.values())))
+
+    fig_alloc = go.Figure()
+    for name in names:
+        w = group_weights[name].reindex(all_groups, fill_value=0.0)
+        fig_alloc.add_trace(go.Bar(x=all_groups, y=w.values * 100, name=display_name(name),
+                                    marker_color=portfolio_color(name)))
+    fig_alloc.update_layout(
+        barmode="group", yaxis_title="Weight (%)", height=360,
+        margin=dict(l=10, r=10, t=10, b=10), legend=dict(orientation="h", y=-0.25),
+    )
+    st.plotly_chart(fig_alloc, use_container_width=True)
+    if any(w.get("Alternatives (hedge funds)", 0.0) > 0 for w in group_weights.values()):
+        st.caption(
+            "'Alternatives (hedge funds)' has no equivalent in the portfolio that doesn't hold it - "
+            "shown as 0% there rather than folded into an unrelated bucket like Commodities, which "
+            "would misrepresent both sides."
+        )
+
+    st.markdown("**Which funds make up each bucket**")
+    for grp in all_groups:
+        rows = []
+        for name in names:
+            df = portfolio_summary(name)
+            groups = df["AssetClass"].map(lambda c: portfolios_mod.COMPARISON_GROUPS.get(c, c))
+            for _, r in df[groups == grp].iterrows():
+                rows.append({"Bucket": grp, "Portfolio": display_name(name), "Holding": r["Holding"],
+                             "Weight": r["Weight"]})
+        if not rows:
+            continue
+        with st.expander(f"{grp} ({group_weights['Four Seasons'].get(grp, 0)*100:.2f}% Four Seasons, "
+                          f"{group_weights['Better'].get(grp, 0)*100:.2f}% Better)"):
+            st.dataframe(
+                pd.DataFrame(rows)[["Portfolio", "Holding", "Weight"]],
+                use_container_width=True, hide_index=True,
+                column_config={"Weight": st.column_config.NumberColumn("Weight", format="percent")},
+            )
+
+    st.markdown("**How each asset class has evolved on its own (growth of £1, unweighted, no fees)**")
+    st.caption(
+        "Each portfolio's own buckets, shown independently of one another - this is the underlying "
+        "market exposure only, not a simulated outcome. Where a bucket blends several of a "
+        "portfolio's own holdings (e.g. Better's Global Bonds), this is that blend at its own "
+        "internal weights, rescaled to 100%."
+    )
+    cols = st.columns(2)
+    for col, name in zip(cols, names):
+        with col:
+            st.caption(display_name(name))
+            fig = go.Figure()
+            for grp in sorted(group_weights[name].index):
+                monthly = bucket_monthly_returns(name, grp, asset_df)
+                if monthly.empty:
+                    continue
+                growth = (1 + monthly).cumprod() * 100
+                fig.add_trace(go.Scatter(x=growth.index, y=growth.values, name=grp, mode="lines"))
+            fig.update_layout(
+                height=340, yaxis_title="Growth of £100", margin=dict(l=10, r=10, t=10, b=10),
+                legend=dict(orientation="h", y=-0.35, font=dict(size=9)),
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+    st.markdown("**How that split would have built up an example £500,000 pot (buy-and-hold)**")
+    st.caption(
+        "Illustrative only: starts each bucket at its actual portfolio weight of a £500,000 pot and "
+        "grows each slice on its own market return, with NO further rebalancing and NO withdrawals - "
+        "isolates how the mix alone would have drifted and grown. The actual withdrawal-adjusted, "
+        "fee-adjusted simulation (which assumes the blend is rebalanced back to target weights each "
+        "month, per weighted_monthly_returns) is shown separately further down this page."
+    )
+    example_pot = 500_000.0
+    cols2 = st.columns(2)
+    for col, name in zip(cols2, names):
+        with col:
+            st.caption(display_name(name))
+            fig = go.Figure()
+            for grp in sorted(group_weights[name].index):
+                weight = group_weights[name].get(grp, 0.0)
+                if weight <= 0:
+                    continue
+                monthly = bucket_monthly_returns(name, grp, asset_df)
+                if monthly.empty:
+                    continue
+                value = weight * example_pot * (1 + monthly).cumprod()
+                fig.add_trace(go.Scatter(x=value.index, y=value.values, name=grp, mode="lines",
+                                          stackgroup="one"))
+            fig.update_layout(
+                height=340, yaxis_title="£", margin=dict(l=10, r=10, t=10, b=10),
+                legend=dict(orientation="h", y=-0.35, font=dict(size=9)),
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+
 def render_holdings_section(names) -> None:
     """'What each portfolio holds' for a single section (Accumulation or Decumulation) - kept as
     its own reusable block so each section is self-contained (cards, chart, holdings all together)
     instead of one shared holdings block sitting between the two sections."""
     names = ordered_names(names)
+    if not names:
+        st.subheader("What each portfolio holds")
+        st.caption("No portfolios selected.")
+        return
+
+    if len(names) > 1:
+        st.subheader("Asset allocation, like-for-like")
+        st.caption(
+            "Portfolios here often label the same underlying exposure differently - e.g. Four Seasons' "
+            "'Global Equities' vs Better's 'Eq Gbl DM Novum Mgd Vol' / 'Eq Gbl DM Quality Gross' - so "
+            "comparing their raw asset-class names never lines up even when the actual market exposure "
+            "is similar. This groups every portfolio's holdings onto a shared set of asset-class buckets "
+            "first, so the allocation split below is a fair, apples-for-apples comparison rather than "
+            "one skewed by naming differences alone."
+        )
+        group_weights = {name: comparison_group_weights(name) for name in names}
+        all_groups = sorted(set().union(*(w.index for w in group_weights.values())))
+        fig_alloc = go.Figure()
+        for name in names:
+            w = group_weights[name].reindex(all_groups, fill_value=0.0)
+            fig_alloc.add_trace(go.Bar(x=all_groups, y=w.values * 100, name=display_name(name),
+                                        marker_color=portfolio_color(name)))
+        fig_alloc.update_layout(
+            barmode="group", yaxis_title="Weight (%)", height=380,
+            margin=dict(l=10, r=10, t=10, b=10), legend=dict(orientation="h", y=-0.25),
+        )
+        st.plotly_chart(fig_alloc, use_container_width=True)
+        if any(w.get("Alternatives (hedge funds)", 0.0) > 0 for w in group_weights.values()):
+            st.caption(
+                "'Alternatives (hedge funds)' has no equivalent in portfolios that don't hold it - shown "
+                "as 0% for those rather than folded into an unrelated bucket like Commodities, which "
+                "would misrepresent both sides."
+            )
+
     st.subheader("What each portfolio holds")
     st.caption(
         "Full underlying holdings for every portfolio above, with each holding's asset-class "
         "mapping and fee (OCF), plus the portfolio's overall weighted-average fee."
     )
-    if not names:
-        st.caption("No portfolios selected.")
-        return
     cols = st.columns(2) if len(names) > 1 else [st.container()]
     for i, name in enumerate(names):
         with cols[i % len(cols)]:
@@ -557,6 +723,14 @@ def build_summary_pdf(accum_results: dict, decum_results: dict, accum_profile_kw
             0, 6,
             f"Decumulation - {display_name(b)} cuts probability of ruin by {ruin_diff_pp:.1f} "
             f"percentage points versus {display_name(a)}, and {legacy_phrase}, {vol_phrase}.",
+        )
+        pdf.ln(1)
+        pdf.set_font("Helvetica", "I", 8)
+        pdf.set_text_color(120, 120, 120)
+        pdf.multi_cell(
+            0, 5,
+            "* Withdrawals are taken as a single lump sum at the start of each year, before that "
+            "year's investment growth is applied.",
         )
         pdf.ln(2)
 
@@ -1347,6 +1521,8 @@ if show_decum:
                  "hand it to the client or attach it to a follow-up email.",
         )
         render_holdings_section(ordered_names(results))
+        st.divider()
+        render_fs_better_asset_class_comparison(asset_df)
         st.divider()
 
     st.subheader("Headline statistics")

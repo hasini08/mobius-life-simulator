@@ -1,76 +1,76 @@
-Portfolio,Holding,AssetClass,Weight,OCF
-Original,Cash,Cash,0.015,0.0
-Original,L&G All Stocks Gilt Index Trust Fund,UK Gilts All Stocks,0.015,0.0012
-Original,Vanguard U.K. Short-Term Gilt Index Fund,UK Gilts All Stocks,0.0125,0.0012
-Original,L&G Short Dated Sterling Corporate Bond Index Fund,Global Bonds,0.0275,0.0016
-Original,abrdn Global Inflation-Linked Bond Tracker Fund,UK Index-Linked Gilts,0.0225,0.0016
-Original,abrdn Short Dated Global Inflation-Linked Bond Tracker,UK Index-Linked Gilts,0.0225,0.0016
-Original,Vanguard Global Bond Fund,Global Bonds,0.0425,0.0015
-Original,Vanguard Global Short-Term Bond Index Fund,Global Bonds,0.0425,0.0015
-Original,iShares Environment & Low Carbon Tilt Real Estate Index Fund,REITs,0.025,0.002
-Original,abrdn Global Infrastructure Equity Tracker Fund,Infrastructure,0.055,0.0016
-Original,Vanguard FTSE U.K. All Share Index Fund,Global Equities,0.1,0.0006
-Original,HSBC FTSE All-World Index Fund,Global Equities,0.17,0.0013
-Original,Fidelity Index World Fund,Global Equities,0.06,0.0012
-Original,L&G S&P 500 US Equal Weight Index Fund,Global Equities,0.07,0.003
-Original,HSBC European Index Fund,Global Equities,0.08,0.0013
-Original,iShares Japan Equity Index Fund,Global Equities,0.05,0.0018
-Original,UBS MSCI World Minimum Volatility Index Equity Fund,Global Equities,0.04,0.003
-Original,Vanguard Emerging Markets Stock Index Fund,EM Equities,0.15,0.0022
-Alternative,Cash,Cash,0.015,0.0007
-Alternative,L&G L AA All Stocks Gilt Index Fund,UK Gilts All Stocks,0.015,0.0007
-Alternative,L&G BS 0 to 5 Year Gilts Index Fund,UK Gilts All Stocks,0.013,0.0007
-Alternative,L&G CSAJ Short Dated Sterling Corporate Bond Index Fund,Global Bonds,0.028,0.0007
-Alternative,abrdn Global Inflation-Linked Bond Tracker Fund,UK Index-Linked Gilts,0.0225,0.0007
-Alternative,abrdn Short Dated Global Inflation-Linked Bond Tracker,UK Index-Linked Gilts,0.0225,0.0007
-Alternative,Vanguard Global Bond Fund,Global Bonds,0.0425,0.0007
-Alternative,Vanguard Global Short-Term Bond Index Fund,Global Bonds,0.0425,0.0007
-Alternative,iShares Environment & Low Carbon Tilt Real Estate Index Fund,REITs,0.025,0.0007
-Alternative,abrdn Global Infrastructure Equity Tracker Fund,Infrastructure,0.055,0.0007
-Alternative,L&G N UK Equity Index Fund,Global Equities,0.1,0.0007
-Alternative,BLK Aquila Life World Index Fund,Global Equities,0.153,0.0007
-Alternative,BLK Aquila Life MSCI World Fund,Global Equities,0.06,0.0007
-Alternative,HSBC S&P 500 Equal Weight Equity fund,Global Equities,0.07,0.0007
-Alternative,BLK Aquila Life European Equity Index Fund,Global Equities,0.08,0.0007
-Alternative,BLK Aquila Life Japanese Equity Fund,Global Equities,0.05,0.0007
-Alternative,L&G GPBV MSCI Minimum Volatility Index Fund,Global Equities,0.04,0.0007
-Alternative,BLK AQC Emerging Markets Fund,EM Equities,0.167,0.0007
-Four Seasons,Cash,Cash,0.005,0.0
-Four Seasons,abrdn Global Inflation-Linked Bond Tracker Fund,UK Index-Linked Gilts,0.085,0.0016
-Four Seasons,abrdn Short-dated Global Inflation-Linked Bond Fund,UK Index-Linked Gilts,0.0925,0.0016
-Four Seasons,Artemis Short-Duration Strategic Bond Fund,Global Bonds,0.055,0.0045
-Four Seasons,Royal London Short Term Fixed Income Fund,Global Bonds,0.045,0.003
-Four Seasons,Fidelity Index Global Government Bond Fund,Global Bonds,0.06,0.0015
-Four Seasons,iShares Corporate Bond Index Fund,Global Bonds,0.045,0.002
-Four Seasons,iShares Over 15 Years Gilts Index (UK) Fund,UK Gilts 15yr+,0.03,0.002
-Four Seasons,Vanguard U.K. Short-Term Gilt Index Fund,UK Gilts <5yr,0.1125,0.0012
-Four Seasons,iShares $ Treasury Bond 20+yr ETF,US Treasuries 20yr+,0.03,0.0007
-Four Seasons,abrdn Global Infrastructure Equity Tracker Fund,Infrastructure,0.0075,0.0016
-Four Seasons,Dimensional Global Value Fund,Global Equities,0.045,0.003
-Four Seasons,GMO Quality Fund,Global Equities,0.045,0.0035
-Four Seasons,HSBC European Index Fund,Global Equities,0.015,0.0013
-Four Seasons,HSBC FTSE All-World Index Fund,Global Equities,0.0175,0.0013
-Four Seasons,Invesco MSCI World Equal Weight UCITS ETF,Global Equities,0.02,0.003
-Four Seasons,iShares Japan Equity Index Fund,Global Equities,0.0125,0.0018
-Four Seasons,UBS MSCI World Minimum Volatility Index Fund,Global Equities,0.05,0.003
-Four Seasons,Vanguard FTSE All Share Index Fund,Global Equities,0.025,0.0006
-Four Seasons,Vanguard Global Small-Cap Index Fund,Global Equities,0.0225,0.0029
-Four Seasons,Xtrackers MSCI World Energy UCITS ETF,Global Equities,0.0125,0.003
-Four Seasons,Pacific North of South Global Emerging Markets Equity Fund,EM Equities,0.02,0.009
-Four Seasons,Vanguard Emerging Markets Stock Index Fund,EM Equities,0.02,0.0022
-Four Seasons,Invesco Bloomberg Commodity UCITS ETF,Commodities,0.015,0.0019
-Four Seasons,Man Global Resources Equity Fund,Commodities,0.0125,0.008
-Four Seasons,Neuberger Berman Commodities Fund,Commodities,0.025,0.0085
-Four Seasons,iShares Physical Gold ETC,Commodities,0.0375,0.0012
-Four Seasons,WisdomTree Physical Gold - GBP Daily Hedged - ETC,Commodities,0.0375,0.0025
-Better,Global Agg Bonds,Global Agg Bonds,0.325,0.0007
-Better,Eq Gbl DM Quality Gross,Eq Gbl DM Quality Gross,0.125,0.0007
-Better,Eq Gbl DM Novum Mgd Vol,Eq Gbl DM Novum Mgd Vol,0.2,0.0007
-Better,Eq EM Net,Eq EM Net,0.025,0.0007
-Better,US HY Corp Bond,US HY Corp Bond,0.025,0.0007
-Better,US ABS,US ABS,0.05,0.0007
-Better,EM Corp Bond,EM Corp Bond,0.025,0.0007
-Better,US Prop REITS,US Prop REITS,0.025,0.0007
-Better,Commod,Commod,0.05,0.0007
-Better,Hedge Fund Credit Suisse,Hedge Fund Credit Suisse,0.075,0.0007
-Better,HF Trend,HF Trend,0.075,0.0007
+Portfolio,Holding,AssetClass,Weight,OCF,ISIN
+Original,Cash,Cash,0.015,0.0,
+Original,L&G All Stocks Gilt Index Trust Fund,UK Gilts All Stocks,0.015,0.0012,
+Original,Vanguard U.K. Short-Term Gilt Index Fund,UK Gilts All Stocks,0.0125,0.0012,
+Original,L&G Short Dated Sterling Corporate Bond Index Fund,Global Bonds,0.0275,0.0016,
+Original,abrdn Global Inflation-Linked Bond Tracker Fund,UK Index-Linked Gilts,0.0225,0.0016,
+Original,abrdn Short Dated Global Inflation-Linked Bond Tracker,UK Index-Linked Gilts,0.0225,0.0016,
+Original,Vanguard Global Bond Fund,Global Bonds,0.0425,0.0015,
+Original,Vanguard Global Short-Term Bond Index Fund,Global Bonds,0.0425,0.0015,
+Original,iShares Environment & Low Carbon Tilt Real Estate Index Fund,REITs,0.025,0.002,
+Original,abrdn Global Infrastructure Equity Tracker Fund,Infrastructure,0.055,0.0016,
+Original,Vanguard FTSE U.K. All Share Index Fund,Global Equities,0.1,0.0006,
+Original,HSBC FTSE All-World Index Fund,Global Equities,0.17,0.0013,
+Original,Fidelity Index World Fund,Global Equities,0.06,0.0012,
+Original,L&G S&P 500 US Equal Weight Index Fund,Global Equities,0.07,0.003,
+Original,HSBC European Index Fund,Global Equities,0.08,0.0013,
+Original,iShares Japan Equity Index Fund,Global Equities,0.05,0.0018,
+Original,UBS MSCI World Minimum Volatility Index Equity Fund,Global Equities,0.04,0.003,
+Original,Vanguard Emerging Markets Stock Index Fund,EM Equities,0.15,0.0022,
+Alternative,Cash,Cash,0.015,0.0007,
+Alternative,L&G L AA All Stocks Gilt Index Fund,UK Gilts All Stocks,0.015,0.0007,
+Alternative,L&G BS 0 to 5 Year Gilts Index Fund,UK Gilts All Stocks,0.013,0.0007,
+Alternative,L&G CSAJ Short Dated Sterling Corporate Bond Index Fund,Global Bonds,0.028,0.0007,
+Alternative,abrdn Global Inflation-Linked Bond Tracker Fund,UK Index-Linked Gilts,0.0225,0.0007,
+Alternative,abrdn Short Dated Global Inflation-Linked Bond Tracker,UK Index-Linked Gilts,0.0225,0.0007,
+Alternative,Vanguard Global Bond Fund,Global Bonds,0.0425,0.0007,
+Alternative,Vanguard Global Short-Term Bond Index Fund,Global Bonds,0.0425,0.0007,
+Alternative,iShares Environment & Low Carbon Tilt Real Estate Index Fund,REITs,0.025,0.0007,
+Alternative,abrdn Global Infrastructure Equity Tracker Fund,Infrastructure,0.055,0.0007,
+Alternative,L&G N UK Equity Index Fund,Global Equities,0.1,0.0007,
+Alternative,BLK Aquila Life World Index Fund,Global Equities,0.153,0.0007,
+Alternative,BLK Aquila Life MSCI World Fund,Global Equities,0.06,0.0007,
+Alternative,HSBC S&P 500 Equal Weight Equity fund,Global Equities,0.07,0.0007,
+Alternative,BLK Aquila Life European Equity Index Fund,Global Equities,0.08,0.0007,
+Alternative,BLK Aquila Life Japanese Equity Fund,Global Equities,0.05,0.0007,
+Alternative,L&G GPBV MSCI Minimum Volatility Index Fund,Global Equities,0.04,0.0007,
+Alternative,BLK AQC Emerging Markets Fund,EM Equities,0.167,0.0007,
+Four Seasons,Cash,Cash,0.005,0.0,
+Four Seasons,abrdn Global Inflation-Linked Bond Tracker Fund,UK Index-Linked Gilts,0.085,0.0016,GB00BDFZ6L30
+Four Seasons,abrdn Short-dated Global Inflation-Linked Bond Fund,UK Index-Linked Gilts,0.0925,0.0016,GB00BDFZ6S09
+Four Seasons,Artemis Short-Duration Strategic Bond Fund,Global Bonds,0.055,0.0045,GB00BJXPPH66
+Four Seasons,Royal London Short Term Fixed Income Fund,Global Bonds,0.045,0.003,GB00BMNR1H58
+Four Seasons,Fidelity Index Global Government Bond Fund,Global Bonds,0.06,0.0015,GB00BR560P63
+Four Seasons,iShares Corporate Bond Index Fund,Global Bonds,0.045,0.002,GB00B84DSW83
+Four Seasons,iShares Over 15 Years Gilts Index (UK) Fund,UK Gilts 15yr+,0.03,0.002,GB00BF338G29
+Four Seasons,Vanguard U.K. Short-Term Gilt Index Fund,UK Gilts <5yr,0.1125,0.0012,IE0001XQBMD1
+Four Seasons,iShares $ Treasury Bond 20+yr ETF,US Treasuries 20yr+,0.03,0.0007,IE0006NB6WZ4
+Four Seasons,abrdn Global Infrastructure Equity Tracker Fund,Infrastructure,0.0075,0.0016,GB00BRCFRK09
+Four Seasons,Dimensional Global Value Fund,Global Equities,0.045,0.003,IE00B3NVPH21
+Four Seasons,GMO Quality Fund,Global Equities,0.045,0.0035,IE00BJ56QR44
+Four Seasons,HSBC European Index Fund,Global Equities,0.015,0.0013,GB00B80QGH28
+Four Seasons,HSBC FTSE All-World Index Fund,Global Equities,0.0175,0.0013,GB00BMJJJF91
+Four Seasons,Invesco MSCI World Equal Weight UCITS ETF,Global Equities,0.02,0.003,IE000OEF25S1
+Four Seasons,iShares Japan Equity Index Fund,Global Equities,0.0125,0.0018,GB00B6QQ9X96
+Four Seasons,UBS MSCI World Minimum Volatility Index Fund,Global Equities,0.05,0.003,GB00BX9C1N70
+Four Seasons,Vanguard FTSE All Share Index Fund,Global Equities,0.025,0.0006,GB00BPN5P907
+Four Seasons,Vanguard Global Small-Cap Index Fund,Global Equities,0.0225,0.0029,IE00BPT2BD14
+Four Seasons,Xtrackers MSCI World Energy UCITS ETF,Global Equities,0.0125,0.003,IE00BM67HM91
+Four Seasons,Pacific North of South Global Emerging Markets Equity Fund,EM Equities,0.02,0.009,IE00056MNKE1
+Four Seasons,Vanguard Emerging Markets Stock Index Fund,EM Equities,0.02,0.0022,IE00BPT2BB99
+Four Seasons,Invesco Bloomberg Commodity UCITS ETF,Commodities,0.015,0.0019,IE00BD6FTQ80
+Four Seasons,Man Global Resources Equity Fund,Commodities,0.0125,0.008,IE000HZUNGD2
+Four Seasons,Neuberger Berman Commodities Fund,Commodities,0.025,0.0085,IE00079M4LO1
+Four Seasons,iShares Physical Gold ETC,Commodities,0.0375,0.0012,IE00B4ND3602
+Four Seasons,WisdomTree Physical Gold - GBP Daily Hedged - ETC,Commodities,0.0375,0.0025,JE00B7VG2M16
+Better,Global Agg Bonds,Global Agg Bonds,0.325,0.0007,
+Better,Eq Gbl DM Quality Gross,Eq Gbl DM Quality Gross,0.125,0.0007,
+Better,Eq Gbl DM Novum Mgd Vol,Eq Gbl DM Novum Mgd Vol,0.2,0.0007,
+Better,Eq EM Net,Eq EM Net,0.025,0.0007,
+Better,US HY Corp Bond,US HY Corp Bond,0.025,0.0007,
+Better,US ABS,US ABS,0.05,0.0007,
+Better,EM Corp Bond,EM Corp Bond,0.025,0.0007,
+Better,US Prop REITS,US Prop REITS,0.025,0.0007,
+Better,Commod,Commod,0.05,0.0007,
+Better,Hedge Fund Credit Suisse,Hedge Fund Credit Suisse,0.075,0.0007,
+Better,HF Trend,HF Trend,0.075,0.0007,
