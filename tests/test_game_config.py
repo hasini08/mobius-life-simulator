@@ -1,13 +1,14 @@
 """
-Smoke tests for the static config dict in app/pages/1_Portfolio_Builder_Game.py (ASSET_CLASS_INFO)
-- the hints/cheat-sheet content shown alongside the game's own asset-class list. This would be the
-easiest thing to quietly break while adding a new asset class (e.g. adding one to portfolios.AC but
-forgetting its ASSET_CLASS_INFO blurb, so a slider's "i" tooltip silently goes missing).
+Smoke tests for the static config in app/pages/1_Portfolio_Builder_Game.py - specifically
+GAME_BUCKETS, the consolidated asset-class menu the game shows instead of the main app's full
+~26-series list. Each bucket is a fixed blend of the underlying return series (portfolios.AC)
+plus a fixed fee assumption, so the easiest way to quietly break the game is to wire a bucket to
+a series name the data doesn't have, or to sub-weights that don't add up.
 
 The game file is a Streamlit PAGE script (executes top-level UI code on import, e.g. st.markdown()
-calls that need a real Streamlit runtime) - rather than importing it directly, its config dicts are
-extracted via ast.literal_eval, exactly the way this was checked by hand while building the hints
-feature. This is deliberately read-only static analysis, not a run of the actual page.
+calls that need a real Streamlit runtime) - rather than importing it directly, its config dict is
+extracted via ast.literal_eval. This is deliberately read-only static analysis, not a run of the
+actual page. (The page itself also asserts these same invariants at load time.)
 
 Run with: pytest tests/ (from the repo root, after `pip install -r requirements-dev.txt`)
 """
@@ -39,22 +40,39 @@ def game_tree():
 
 
 @pytest.fixture(scope="module")
-def asset_class_info(game_tree):
-    return _extract_module_level_dict(game_tree, "ASSET_CLASS_INFO")
+def game_buckets(game_tree):
+    return _extract_module_level_dict(game_tree, "GAME_BUCKETS")
 
 
-def test_every_individual_building_block_has_a_hint(asset_class_info):
-    missing = [label for label in AC if label not in asset_class_info]
-    assert not missing, f"individual building blocks missing an ASSET_CLASS_INFO hint: {missing}"
+def test_there_is_a_small_handful_of_buckets(game_buckets):
+    """The whole point of the consolidated menu is that it's short - if this ever creeps back up
+    towards the main app's full list, something has gone wrong."""
+    assert 3 <= len(game_buckets) <= 10, f"expected a short bucket menu, got {len(game_buckets)}"
 
 
-def test_asset_class_info_entries_are_well_formed(asset_class_info):
-    """Each entry is (blurb, risk_tier) where risk_tier starts with one of the three traffic-light
-    emoji the slider tooltips and cheat sheet rely on - a typo here (e.g. a plain string tier)
-    would silently break the risk-tier colour coding used by the live risk dial too."""
+def test_every_bucket_is_well_formed(game_buckets):
     valid_tiers = ("🟢", "🟡", "🔴")
-    for label, info in asset_class_info.items():
-        assert isinstance(info, tuple) and len(info) == 2, f"{label!r}: expected (blurb, risk_tier) tuple"
-        blurb, risk_tier = info
-        assert isinstance(blurb, str) and len(blurb) > 10, f"{label!r}: blurb looks too short/missing"
-        assert risk_tier.startswith(valid_tiers), f"{label!r}: risk tier {risk_tier!r} doesn't start with 🟢/🟡/🔴"
+    for name, cfg in game_buckets.items():
+        assert set(cfg) >= {"series", "fee", "risk", "blurb"}, f"{name!r}: missing a required key"
+        assert isinstance(cfg["series"], dict) and cfg["series"], f"{name!r}: 'series' must be a non-empty dict"
+        assert cfg["risk"].startswith(valid_tiers), f"{name!r}: risk {cfg['risk']!r} must start with 🟢/🟡/🔴"
+        assert isinstance(cfg["blurb"], str) and len(cfg["blurb"]) > 20, f"{name!r}: blurb looks too short"
+
+
+def test_every_bucket_component_series_is_real_data(game_buckets):
+    for name, cfg in game_buckets.items():
+        unknown = [s for s in cfg["series"] if s not in AC]
+        assert not unknown, f"{name!r}: component series not in portfolios.AC: {unknown}"
+
+
+def test_every_bucket_component_weights_sum_to_one(game_buckets):
+    for name, cfg in game_buckets.items():
+        total = sum(cfg["series"].values())
+        assert abs(total - 1.0) < 1e-9, f"{name!r}: component series weights sum to {total}, not 1.0"
+
+
+def test_every_bucket_fee_is_a_plausible_fraction(game_buckets):
+    """Fees are stored as a decimal fraction (0.0012 == 0.12% pa), not a percent - a value above
+    a couple of percent almost certainly means someone wrote 1.2 meaning 1.2%."""
+    for name, cfg in game_buckets.items():
+        assert 0.0 <= cfg["fee"] < 0.02, f"{name!r}: fee {cfg['fee']} doesn't look like a decimal fraction"

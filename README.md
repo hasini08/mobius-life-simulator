@@ -93,12 +93,14 @@ Two pages, one Streamlit app, both reading the same `data/` and `src/`:
   holdings/weights/fees are **data-driven** (`data/portfolio_holdings.csv` etc.), editable
   live in the app's sidebar — adding a brand new competitor portfolio needs no code changes.
 - **`app/pages/1_Portfolio_Builder_Game.py`** — a gamified internal version. Players assign
-  weights and fees across the individual underlying asset-class series, hit reveal, and see only
-  their probability of ruin — plus a shared cross-device leaderboard, badges, historical
+  weights across a short menu of ~7 consolidated asset classes (each a fixed blend of the same
+  underlying series the main app uses; fees are fixed per class, not player-set), hit reveal, and
+  see only their probability of ruin — plus a shared cross-device leaderboard, badges, historical
   crash-test buttons, and an interactive fan chart of their own pot's simulated range. Built for
-  a live company-wide activity, not client use. (An earlier version also offered a broader "fund
-  store categories" mode and benchmarked players against Mobius Better; both were dropped after
-  event feedback in favour of just the one, more meaningful mode.)
+  a live company-wide activity, not client use. (Earlier versions exposed all ~26 underlying
+  series with per-row fee inputs, offered a broader "fund store categories" mode, and benchmarked
+  players against Mobius Better; all were dropped after event feedback in favour of the one
+  simpler mode.)
 
 ## How it fits together
 
@@ -339,7 +341,7 @@ horizon, pot, spend, and constraints) rather than each picking their own. The "�
 (host controls)" expander at the top of the game page handles this:
 
 - **By default, everyone sees a read-only summary** of the current scenario (age, horizon, pot,
-  spend, max asset classes, max fee) plus a caption showing who last published it and when. They
+  spend, max asset classes) plus a caption showing who last published it and when. They
   cannot edit it.
 - **The session host enters a PIN** in the same expander to unlock editable controls, sets the
   scenario, and clicks **"📡 Publish to all groups"**. Every other open tab/device picks up the
@@ -463,11 +465,11 @@ judgement calls, not settled facts.
   bleeding-edge type-hint syntax** — Streamlit appears to touch every page file when building
   the sidebar nav, so a syntax/import error in ANY page can crash the whole app, not just that
   page.
-- **`tests/` covers the core math as a smoke suite, not full coverage.** 29 tests across
+- **`tests/` covers the core math as a smoke suite, not full coverage.** 32 tests across
   `test_engine.py` (simulation shapes/determinism/directional sanity), `test_portfolios.py`
   (every portfolio's weights sum to 1, fees are plausible, every holding maps to real data), and
-  `test_game_config.py` (the game's `ASSET_CLASS_INFO` dict, checked via `ast.literal_eval`
-  rather than importing the Streamlit page directly). Deliberately scoped to
+  `test_game_config.py` (the game's `GAME_BUCKETS` config — component series, fees and weights —
+  checked via `ast.literal_eval` rather than importing the Streamlit page directly). Deliberately scoped to
   catch a bad data/code edit silently producing wrong probability-of-ruin numbers — not UI
   testing, not full coverage. See [Running the test suite](#running-the-test-suite) below. Every
   module is also independently runnable for a manual self-test (`python src/tax.py` etc.), and

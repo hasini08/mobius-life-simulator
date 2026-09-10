@@ -5,7 +5,7 @@ this is the "what do I actually click, in what order" guide. For anything techni
 architecture, known issues), see [README.md](README.md) instead.
 
 **What the game actually is, in one paragraph**: each team builds their own retirement portfolio
-— picking a mix of asset classes, weights and fees — then finds out its "probability of ruin":
+— picking a mix of asset classes and how much to put in each — then finds out its "probability of ruin":
 the chance, across 2,000 simulated futures built from real historical market data, that their
 pot runs out of money before the plan is meant to end. Lower is better. Everyone plays the same
 scenario (same starting age, pot, spend) so scores are directly comparable, and nobody sees their
@@ -43,15 +43,15 @@ you can find on the day.)*
 
 ## Running a round
 
-1. **Set the scenario** (in host mode): starting age, pot, spend, time horizon, and the two
-   constraints (max asset classes, max fee). Defaults are reasonable if you don't want to
+1. **Set the scenario** (in host mode): starting age, pot, spend, time horizon, and the cap on
+   how many asset classes a player may use. Defaults are reasonable if you don't want to
    customise. Click **"📡 Publish to all groups"**.
    Nobody sees the actual portfolio builder until you've done this — before that, everyone's
    looking at a "how to play" screen with a **"🔄 Check again"** button. Tell them to hit that
    once you've published; it unlocks their builder right there (with a little balloons moment).
 2. **Tell everyone to build and lock in their portfolio.** Each team/person:
    - Enters a team name
-   - Drags sliders until they hit 100%, sets fees
+   - Drags sliders (2% steps) or types an exact % for each asset class until they hit 100%
    - Clicks **"🔒 Lock in my portfolio"**
    - Their score is calculated immediately but stays **hidden** from them — this is deliberate,
      it's what keeps the suspense until you reveal.

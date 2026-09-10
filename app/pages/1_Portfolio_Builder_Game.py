@@ -2,9 +2,10 @@
 Portfolio Builder Game - a fun, standalone activity built on the SAME simulation engine and
 asset-class data as the main comparison tool (src/engine.py, data/asset_class_returns.csv), so a
 player's constructed portfolio is scored on exactly the same probability-of-ruin metric the main
-app uses - just with the player choosing the allocation and fees themselves, across the individual
-underlying asset-class series, instead of comparing two pre-built portfolios. After revealing, the
-player can
+app uses - just with the player choosing the allocation themselves, across a handful of
+consolidated asset-class buckets (GAME_BUCKETS - each a fixed blend of the same underlying series
+the main app uses, with a fixed low-cost fee assumption), instead of comparing two pre-built
+portfolios. After revealing, the player can
 also click through real historical crises (CRASH_SCENARIOS) to re-test the SAME built portfolio
 starting right as a real crash happened, instead of the full-history average - "would this have
 survived the 2008 crash" as a fun, optional exploration once the headline score is already in.
@@ -50,7 +51,7 @@ import streamlit.components.v1 as components
 
 import tax
 from engine import load_asset_returns, load_cpi, run_simulation, ClientProfile
-from portfolios import AC, PORTFOLIOS, DATA_DIR, EQUITY_CLASSES
+from portfolios import AC, DATA_DIR
 
 st.set_page_config(page_title="Mobius Wealth - Portfolio Builder Game", layout="wide", page_icon="🎮")
 
@@ -218,29 +219,6 @@ st.markdown(
         max-width: 60rem;
     }}
 
-    .howto-row {{ display: flex; flex-wrap: wrap; gap: 0.75rem; margin-bottom: 1.2rem; }}
-    .howto-card {{
-        flex: 1 1 200px;
-        border-radius: 14px;
-        padding: 0.9rem 1rem;
-        background: white;
-        border: 1px solid {STEEL_GREY};
-        transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
-    }}
-    .howto-card:hover {{
-        transform: translateY(-3px);
-        box-shadow: 0 8px 20px rgba(14, 15, 20, 0.1);
-        border-color: {CARBON_BLACK};
-    }}
-    .howto-card .num {{
-        display: inline-flex; align-items: center; justify-content: center;
-        width: 1.6rem; height: 1.6rem; border-radius: 50%;
-        background: {CARBON_BLACK};
-        color: white; font-weight: 700; font-size: 0.85rem;
-        margin-bottom: 0.4rem;
-    }}
-    .howto-card .txt {{ font-size: 0.85rem; color: {GREY_700}; }}
-
     .stats-banner {{
         display: flex; flex-wrap: wrap; gap: 1.5rem; justify-content: center;
         border-radius: 14px; padding: 0.75rem 1rem; margin-bottom: 1.2rem;
@@ -269,20 +247,63 @@ st.markdown(
         50% {{ opacity: 0.55; transform: scale(1.15); }}
     }}
 
-    .cheat-sheet-row {{
-        padding: 0.5rem 0.6rem; border-bottom: 1px solid {STEEL_GREY};
-        font-size: 0.85rem; border-radius: 8px; margin: 0 -0.6rem;
-        transition: background 0.15s ease;
+    /* Animated "how it works" filmstrip - replaces the old numbered How-to-Play cards and the
+       maths expander with one glanceable, self-explaining illustration: bars fill in (build),
+       a button clicks (lock in), a podium rises with a trophy (reveal). Pure CSS keyframes, no
+       DOM churn, so it doesn't trip the twemoji MutationObserver. Loops on a shared 5s cycle. */
+    .hiw-strip {{
+        display: flex; align-items: stretch; flex-wrap: wrap;
+        border: 1px solid {STEEL_GREY}; border-radius: 16px; overflow: hidden;
+        background: white; margin-bottom: 1.4rem;
+        box-shadow: 0 4px 14px rgba(14, 15, 20, 0.06);
     }}
-    .cheat-sheet-row:hover {{ background: {GREY_100}; }}
-    .cheat-sheet-row:last-child {{ border-bottom: none; }}
-    .cheat-sheet-row .cs-head {{
-        display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline;
-        gap: 0.5rem; margin-bottom: 0.15rem;
+    .hiw-stage {{ flex: 1 1 190px; padding: 1.1rem 1.2rem 1rem; }}
+    .hiw-stage + .hiw-stage {{ border-left: 1px solid {GREY_200}; }}
+    .hiw-cap {{
+        display: flex; align-items: center; gap: 0.45rem; margin-bottom: 0.7rem;
+        font-size: 0.72rem; font-weight: 700; text-transform: uppercase;
+        letter-spacing: 0.06em; color: {GREY_600};
     }}
-    .cheat-sheet-row .cs-label {{ font-weight: 600; }}
-    .cheat-sheet-row .cs-risk {{ white-space: nowrap; font-size: 0.8rem; }}
-    .cheat-sheet-row .cs-blurb {{ color: {GREY_700}; }}
+    .hiw-num {{
+        display: inline-flex; align-items: center; justify-content: center;
+        width: 1.3rem; height: 1.3rem; border-radius: 50%;
+        background: {CARBON_BLACK}; color: white; font-size: 0.72rem; font-weight: 700;
+    }}
+    .hiw-art {{ height: 76px; display: flex; flex-direction: column; justify-content: center; gap: 8px; }}
+    .hiw-bar {{ height: 9px; border-radius: 5px; background: {GREY_100}; overflow: hidden; }}
+    .hiw-bar > i {{
+        display: block; height: 100%; width: 0; border-radius: 5px;
+        background: linear-gradient(90deg, {LIGHT_SAGE}, #7FB79C);
+        animation: hiwFill 5s ease-in-out infinite;
+    }}
+    .hiw-bar:nth-child(1) > i {{ --w: 64%; animation-delay: 0s; }}
+    .hiw-bar:nth-child(2) > i {{ --w: 22%; animation-delay: 0.45s; }}
+    .hiw-bar:nth-child(3) > i {{ --w: 14%; animation-delay: 0.9s; }}
+    @keyframes hiwFill {{ 0%, 8% {{ width: 0; }} 42%, 100% {{ width: var(--w); }} }}
+    .hiw-lock {{
+        align-self: center; padding: 0.5rem 1.15rem; border-radius: 999px;
+        background: {CORAL_RED}; color: white; font-weight: 700; font-size: 0.85rem;
+        animation: hiwPress 5s ease-in-out infinite;
+    }}
+    @keyframes hiwPress {{
+        0%, 52% {{ transform: scale(1); box-shadow: 0 0 0 rgba(255,105,105,0); }}
+        60% {{ transform: scale(0.9); }}
+        68% {{ transform: scale(1.04); box-shadow: 0 8px 20px rgba(255,105,105,0.45); }}
+        78%, 100% {{ transform: scale(1); box-shadow: 0 0 0 rgba(255,105,105,0); }}
+    }}
+    .hiw-board {{ display: flex; align-items: flex-end; justify-content: center; gap: 8px; height: 100%; }}
+    .hiw-col {{ width: 16px; border-radius: 4px 4px 0 0; transform-origin: bottom; transform: scaleY(0);
+        animation: hiwRise 5s ease-out infinite; }}
+    .hiw-col:nth-child(1) {{ height: 52px; background: {COLOR_WARN}; animation-delay: 2.5s; }}
+    .hiw-col:nth-child(2) {{ height: 38px; background: {STEEL_GREY}; animation-delay: 2.7s; }}
+    .hiw-col:nth-child(3) {{ height: 26px; background: #D98FA3; animation-delay: 2.9s; }}
+    @keyframes hiwRise {{ 0%, 50% {{ transform: scaleY(0); }} 68%, 100% {{ transform: scaleY(1); }} }}
+    .hiw-trophy {{ align-self: flex-end; font-size: 1.5rem; animation: hiwPop 5s ease-out infinite; }}
+    @keyframes hiwPop {{
+        0%, 58% {{ opacity: 0; transform: scale(0.3); }}
+        72% {{ opacity: 1; transform: scale(1.2); }}
+        80%, 100% {{ opacity: 1; transform: scale(1); }}
+    }}
 
     .risk-dial-label {{
         display: flex; justify-content: space-between; font-size: 0.8rem;
@@ -627,7 +648,7 @@ def _host_state() -> dict:
     Google Sheets backend as the leaderboard instead."""
     return {
         "age": 65, "horizon": 30, "pot": 500_000, "spend": 20_000,
-        "max_classes": 6, "max_fee_pct": 0.20,
+        "max_classes": 5,
         # Tax & State Pension - off by default (matches the main app's own default), a purely
         # optional "fun side thing" the host can switch on for a group that wants the extra
         # realism. When on, "Desired annual spend" is treated as NET (take-home), same convention
@@ -704,26 +725,109 @@ def _tier(prob_ruin):
         return "High risk", "💀", COLOR_BAD, "Back to the drawing board - this pot runs out a lot."
 
 
-# Extra construction-style groupings for badges, at the same individual-building-block label
-# level _badges() receives its `weights` in - separate from EQUITY_CLASSES (imported from
-# portfolios.py, used across the main app too) since these two groupings are specific to this
-# game's flair tags, not shared model logic.
-OVERSEAS_CLASSES = {
-    "EM Equities", "Eq EM Net", "EM Corp Bond", "Global Bonds", "Global Agg Bonds",
-    "US Treasuries 20yr+", "US HY Corp Bond", "US ABS", "US Prop REITS",
+# The game's consolidated asset-class menu. The main app exposes all ~26 individual underlying
+# series (portfolios.AC); event feedback was that that's far too many sliders for a quick group
+# game, so here players pick from these 7 broad buckets instead. Each bucket is a FIXED blend of
+# one or more of those same underlying series (the `series` sub-weights must sum to 1.0), so the
+# simulation still runs on the real data via the exact same engine - _expand_bucket_weights()
+# below turns a bucket allocation back into the AC-series vector run_simulation expects.
+#
+# `fee` is the assumed all-in annual fund fee for that bucket - players no longer set fees
+# themselves (removed with the old per-row fee inputs and the host "max fee" cap); the game just
+# assumes a sensible low-cost passive fee for each, weighted by the player's allocation.
+#
+# `risk` must start with one of 🟢/🟡/🔴 - the live risk dial, the slider "i" tooltips and the
+# test suite all key off that first character. Risk tiers are a simplified general steer for the
+# game, not advice.
+GAME_BUCKETS: dict = {
+    "Global shares": {
+        "series": {"Global Equities": 1.0},
+        "fee": 0.0012,
+        "risk": "🔴 Higher risk",
+        "blurb": "Shares in large companies across developed markets worldwide - the main engine "
+                 "of long-term growth, and the bumpiest ride.",
+    },
+    "Emerging-market shares": {
+        "series": {"EM Equities": 1.0},
+        "fee": 0.0022,
+        "risk": "🔴 Higher risk",
+        "blurb": "Shares in companies from developing economies (China, India, Brazil...) - "
+                 "higher growth potential, wider swings than developed-market shares.",
+    },
+    "Government bonds": {
+        "series": {"UK Gilts All Stocks": 0.70, "US Treasuries 20yr+": 0.30},
+        "fee": 0.0010,
+        "risk": "🟡 Medium risk",
+        "blurb": "Loans to the UK and US governments - a core defensive holding, though prices "
+                 "still fall when interest rates rise.",
+    },
+    "Index-linked gilts": {
+        "series": {"UK Index-Linked Gilts": 1.0},
+        "fee": 0.0012,
+        "risk": "🟢 Lower risk",
+        "blurb": "UK government bonds whose value rises with inflation - protection for spending "
+                 "power rather than a growth play.",
+    },
+    "Corporate bonds & credit": {
+        "series": {"Global Bonds": 0.60, "Securitised Credit": 0.40},
+        "fee": 0.0018,
+        "risk": "🟡 Medium risk",
+        "blurb": "Loans to companies, plus pools of loans like mortgages packaged up - more "
+                 "income than government bonds, in exchange for more risk.",
+    },
+    "Real assets": {
+        "series": {"REITs": 0.40, "Infrastructure": 0.35, "Commodities": 0.25},
+        "fee": 0.0035,
+        "risk": "🟡 Medium risk",
+        "blurb": "Property, infrastructure and commodities - real-world assets that often hold "
+                 "their value better than shares or bonds when inflation is high.",
+    },
+    "Cash": {
+        "series": {"Cash": 1.0},
+        "fee": 0.0005,
+        "risk": "🟢 Lower risk",
+        "blurb": "Bank deposits and equivalents - the steadiest holding, but returns rarely beat "
+                 "inflation over long periods.",
+    },
 }
-ALTERNATIVE_CLASSES = {
-    "Commodities", "Infrastructure", "REITs", "US Prop REITS", "Securitised Credit",
-    "US ABS", "Hedge Fund Credit Suisse", "HF Trend",
-}
+
+
+def _expand_bucket_weights(bucket_weights: "pd.Series") -> "pd.Series":
+    """Turn a player's bucket allocation (indexed by GAME_BUCKETS key, summing to 1) into the
+    underlying asset-class-series weight vector weighted_monthly_returns/run_simulation expect
+    (indexed by portfolios.AC keys), spreading each bucket across its fixed component series."""
+    out: dict = {}
+    for bucket, bw in bucket_weights.items():
+        for series_key, share in GAME_BUCKETS[bucket]["series"].items():
+            out[series_key] = out.get(series_key, 0.0) + float(bw) * float(share)
+    return pd.Series(out, dtype=float)
+
+
+def _bucket_weighted_fee(bucket_weights: "pd.Series") -> float:
+    """The fixed per-bucket fees (GAME_BUCKETS[...]['fee']) weighted by the player's allocation."""
+    return float(sum(float(bw) * GAME_BUCKETS[b]["fee"] for b, bw in bucket_weights.items()))
+
+
+# Fail loudly at page load rather than silently mid-game if a bucket is ever wired to a series
+# name the data doesn't have, or its component weights don't add up.
+for _b, _cfg in GAME_BUCKETS.items():
+    assert abs(sum(_cfg["series"].values()) - 1.0) < 1e-9, f"{_b}: component series weights must sum to 1"
+    for _sk in _cfg["series"]:
+        assert _sk in AC, f"{_b}: component series {_sk!r} is not a known asset class (portfolios.AC)"
+
+
+# Badge groupings, in the same bucket-label terms _badges() receives its `weights` in.
+_GAME_EQUITY_BUCKETS = {"Global shares", "Emerging-market shares"}
+_GAME_OVERSEAS_BUCKETS = {"Emerging-market shares"}
+_GAME_ALT_BUCKETS = {"Real assets"}
 
 
 def _badges(weights, custom_fee, selected_count, max_classes):
     """Flair tags based on HOW a portfolio was built, not the score - separate from the tier
     verdict (which is purely about the outcome), these reward specific construction choices."""
-    equity_weight = float(weights[weights.index.isin(EQUITY_CLASSES)].sum())
-    overseas_weight = float(weights[weights.index.isin(OVERSEAS_CLASSES)].sum())
-    alt_weight = float(weights[weights.index.isin(ALTERNATIVE_CLASSES)].sum())
+    equity_weight = float(weights[weights.index.isin(_GAME_EQUITY_BUCKETS)].sum())
+    overseas_weight = float(weights[weights.index.isin(_GAME_OVERSEAS_BUCKETS)].sum())
+    alt_weight = float(weights[weights.index.isin(_GAME_ALT_BUCKETS)].sum())
     max_single = float(weights.max()) if len(weights) else 0.0
     tags = []
     if equity_weight >= 0.8:
@@ -732,7 +836,7 @@ def _badges(weights, custom_fee, selected_count, max_classes):
         tags.append("🛡️ Ultra Safe")
     elif 0.35 <= equity_weight <= 0.65:
         tags.append("⚖️ Balanced")
-    if custom_fee <= 0.0015:
+    if custom_fee <= 0.0012:
         tags.append("💰 Fee Hawk")
     if selected_count == max_classes:
         tags.append("🌐 Diversifier")
@@ -749,75 +853,21 @@ def _badges(weights, custom_fee, selected_count, max_classes):
 # earn their keep by being read, not just collected. Keys must match _badges()'s tag strings
 # exactly (emoji + label).
 BADGE_MEANINGS = {
-    "🎲 Risk Taker": "80%+ in equities. Bold. Reckless. Possibly both.",
-    "🛡️ Ultra Safe": "20% or less in equities. Sleeps very soundly at night.",
-    "⚖️ Balanced": "35-65% in equities. The have-your-cake-and-eat-it portfolio.",
-    "💰 Fee Hawk": "Weighted fee under 0.15% pa. Squeezed every last basis point out of this.",
+    "🎲 Risk Taker": "80%+ in shares (global + emerging market). Bold. Reckless. Possibly both.",
+    "🛡️ Ultra Safe": "20% or less in shares. Sleeps very soundly at night.",
+    "⚖️ Balanced": "35-65% in shares. The have-your-cake-and-eat-it portfolio.",
+    "💰 Fee Hawk": "Weighted fee 0.12% pa or lower - built from the cheapest, simplest building blocks.",
     "🌐 Diversifier": "Used every asset class the cap allowed. Didn't leave a single one on the table.",
     "🎰 All In": "95%+ in a single asset class. Full send, no plan B.",
-    "🌍 Globe Trotter": "30%+ overseas exposure. Passport fully stamped.",
-    "💎 Alternative Investor": "15%+ in commodities/infrastructure/property/credit alternatives. "
+    "🌍 Globe Trotter": "30%+ in emerging-market shares. Passport fully stamped.",
+    "💎 Alternative Investor": "15%+ in real assets (property, infrastructure, commodities). "
                                 "Too cool for plain stocks and bonds.",
 }
 
 
-# Plain-English blurb + simple risk tier for every individual building-block label a slider can
-# show, aimed at players who don't work with this stuff day to day. Shown as each slider's "?"
-# tooltip and in the cheat-sheet expander. Risk tiers are a simplified, general steer for this
-# game, not advice.
-ASSET_CLASS_INFO: dict[str, tuple[str, str]] = {
-    "Commodities": ("Raw materials like oil, gold and crops. Prices swing with global "
-                     "supply/demand and inflation.", "🔴 Higher risk"),
-    "Infrastructure": ("Investments in things like toll roads, airports and utilities - "
-                        "steady, essential-service cash flows.", "🟡 Medium risk"),
-    "Securitised Credit": ("Bundles of loans (like mortgages) packaged into tradeable "
-                            "securities - extra yield in exchange for extra complexity.", "🟡 Medium risk"),
-    "Global Equities": ("Shares in large companies across developed markets worldwide.", "🔴 Higher risk"),
-    "EM Equities": ("Shares in companies from emerging economies (e.g. China, India, Brazil) - "
-                     "higher growth potential, higher volatility.", "🔴 Higher risk"),
-    "Global Bonds": ("A broad mix of government and corporate bonds from around the world.", "🟡 Medium risk"),
-    "UK Gilts All Stocks": ("The full range of UK government bonds, short and long-dated "
-                             "combined.", "🟢 Lower risk"),
-    "UK Gilts 15yr+": ("Long-dated UK government bonds - more sensitive to interest rate "
-                        "changes than short-dated gilts.", "🟡 Medium risk"),
-    "UK Index-Linked Gilts": ("UK government bonds that rise with inflation.", "🟢 Lower risk"),
-    "REITs": ("Real Estate Investment Trusts - listed companies that own and manage property, "
-              "paying out rental income.", "🟡 Medium risk"),
-    "Cash": ("Bank deposits and equivalents - the safest holding, but returns rarely beat "
-             "inflation over time.", "🟢 Lower risk"),
-    "UK Gilts <5yr": ("Short-dated UK government bonds - lower interest-rate risk than longer "
-                       "gilts.", "🟢 Lower risk"),
-    "US Treasuries 20yr+": ("Long-dated US government bonds - a very safe issuer, but "
-                             "sensitive to interest rate moves.", "🟡 Medium risk"),
-    "Global Agg Bonds": ("A broad global mix of investment-grade government and corporate "
-                          "bonds.", "🟡 Medium risk"),
-    "Eq Gbl DM Quality Gross": ("Developed-market shares in financially strong 'quality' "
-                                 "companies - a steadier equity style.", "🟡 Medium risk"),
-    "Eq Gbl DM Novum Mgd Vol": ("Developed-market shares managed specifically to reduce "
-                                 "volatility.", "🟡 Medium risk"),
-    "Eq EM Net": ("Emerging market shares, net of fees - similar to EM Equities.", "🔴 Higher risk"),
-    "US HY Corp Bond": ("US 'high yield' corporate bonds - higher interest income for taking "
-                         "on more default risk.", "🔴 Higher risk"),
-    "US ABS": ("US Asset-Backed Securities - bonds backed by pools of loans like auto or "
-               "credit card debt.", "🟡 Medium risk"),
-    "EM Corp Bond": ("Corporate bonds issued by companies in emerging markets - higher yield, "
-                      "higher risk.", "🔴 Higher risk"),
-    "US Prop REITS": ("US-listed Real Estate Investment Trusts.", "🟡 Medium risk"),
-    "Commod": ("Commodities (legacy label) - raw materials like oil, gold and crops.", "🔴 Higher risk"),
-    "Hedge Fund Credit Suisse": ("A hedge fund strategy index - aims for returns less tied to "
-                                  "normal market ups and downs.", "🟡 Medium risk"),
-    "HF Trend": ("A 'trend following' hedge fund strategy - aims to profit from sustained "
-                 "price trends in either direction.", "🟡 Medium risk"),
-    "Eq Gbl DM Value Gross": ("Developed-market shares in 'value' companies - stocks that look "
-                               "cheap relative to fundamentals.", "🔴 Higher risk"),
-    "Eq Gbl DM Min vol Gross": ("Developed-market shares specifically selected to minimise "
-                                 "volatility.", "🟡 Medium risk"),
-}
-
-
-def _asset_help(label: str) -> str | None:
-    info = ASSET_CLASS_INFO.get(label)
-    return f"{info[1]} — {info[0]}" if info else None
+def _asset_help(label: str) -> "str | None":
+    info = GAME_BUCKETS.get(label)
+    return f"{info['risk']} — {info['blurb']}" if info else None
 
 
 _RISK_TIER_SCORE = {"🟢": 1.0, "🟡": 2.0, "🔴": 3.0}
@@ -825,7 +875,7 @@ _RISK_TIER_SCORE = {"🟢": 1.0, "🟡": 2.0, "🔴": 3.0}
 
 def _live_risk_read(edited_df) -> tuple[float, str, str] | None:
     """A cheap, instant proxy for how risky the CURRENT slider allocation looks, built from each
-    label's ASSET_CLASS_INFO risk tier weighted by its allocation - not the real simulation (that
+    bucket's GAME_BUCKETS risk tier weighted by its allocation - not the real simulation (that
     only runs on submit), just live feedback while building so the sliders feel like they matter
     immediately. Returns (0-1 dial position, tier label, tier color) or None if nothing's allocated."""
     total = float(edited_df["Weight %"].sum())
@@ -835,8 +885,8 @@ def _live_risk_read(edited_df) -> tuple[float, str, str] | None:
     for _, r in edited_df.iterrows():
         if r["Weight %"] <= 0:
             continue
-        info = ASSET_CLASS_INFO.get(r["Asset class"])
-        tier_score = _RISK_TIER_SCORE.get(info[1][0], 2.0) if info else 2.0
+        info = GAME_BUCKETS.get(r["Asset class"])
+        tier_score = _RISK_TIER_SCORE.get(info["risk"][0], 2.0) if info else 2.0
         weighted += r["Weight %"] * tier_score
     score = weighted / total  # 1.0 (all lower-risk) .. 3.0 (all higher-risk)
     position = (score - 1.0) / 2.0  # 0.0 .. 1.0 for the dial marker
@@ -872,7 +922,7 @@ FUN_FACTS = [
 st.markdown(
     f"<div class='game-hero'>"
     f"<div class='hero-title'><img src='{_logo_data_uri()}' alt='Mobius'><h1>Build Your Own Portfolio</h1></div>"
-    "<p>Assign weightings (and fees) across asset classes, then find out how likely your portfolio "
+    "<p>Assign weightings across a handful of asset classes, then find out how likely your portfolio "
     "is to run out of money in retirement. Runs on the exact same simulation engine and market data "
     "as the main Mobius Wealth comparison tool - nothing here is a simplified stand-in. Play on your "
     "own device - everyone's score lands on the shared leaderboard at the bottom of the page.</p>"
@@ -880,80 +930,28 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-st.markdown("#### 🎮 How to Play")
-_HOWTO_STEPS = [
-    # Plain digits, not keycap emoji (1️⃣2️⃣3️⃣...) - the emoji glyph brings its own square/rounded
-    # "keycap" chrome that clashes with (and looks dated next to) the clean circular Carbon Black
-    # badge .num already styles this with; a bare digit lets that styling actually show through.
-    ("1", "Build your mix", "Assign a weight and a fee to each asset class you want to hold, until you hit 100%."),
-    ("2", "Hit reveal", "Only then do you find out your probability of ruin - no peeking beforehand."),
-    ("3", "Climb the board", "Your score lands on the shared leaderboard below - everyone playing sees it."),
-]
+# The old numbered "How to Play" cards and the collapsible "how the maths works" explainer were
+# replaced, on feedback that the game opened with too much reading, by this one animated
+# filmstrip: bars fill (build a mix), a button clicks (lock in), a podium rises with a trophy
+# (host reveals the ranking). The per-control captions further down carry the detail for anyone
+# who wants it, so nothing essential is lost by making the top of the page a picture instead of
+# a wall of text.
 st.markdown(
-    "<div class='howto-row'>" + "".join(
-        f"<div class='howto-card'><div class='num'>{n}</div><br>"
-        f"<b>{title}</b><div class='txt'>{desc}</div></div>"
-        for n, title, desc in _HOWTO_STEPS
-    ) + "</div>",
+    "<div class='hiw-strip'>"
+    "<div class='hiw-stage'><div class='hiw-cap'><span class='hiw-num'>1</span> Build your mix</div>"
+    "<div class='hiw-art'>"
+    "<div class='hiw-bar'><i></i></div><div class='hiw-bar'><i></i></div><div class='hiw-bar'><i></i></div>"
+    "</div></div>"
+    "<div class='hiw-stage'><div class='hiw-cap'><span class='hiw-num'>2</span> Lock it in</div>"
+    "<div class='hiw-art'><span class='hiw-lock'>🔒 Lock in</span></div></div>"
+    "<div class='hiw-stage'><div class='hiw-cap'><span class='hiw-num'>3</span> Host reveals the board</div>"
+    "<div class='hiw-art'><div class='hiw-board'>"
+    "<span class='hiw-col'></span><span class='hiw-col'></span><span class='hiw-col'></span>"
+    "<span class='hiw-trophy'>🏆</span>"
+    "</div></div></div>"
+    "</div>",
     unsafe_allow_html=True,
 )
-
-
-def _explainer_row(cards: list[tuple[str, str, str]]) -> None:
-    """Same card look as the How to Play row above, reused for the 'how it works' explainer -
-    one visual language for both instead of steps-in-cards next to maths-in-paragraphs."""
-    st.markdown(
-        "<div class='howto-row'>" + "".join(
-            f"<div class='howto-card'><div class='num'>{icon}</div><br>"
-            f"<b>{title}</b><div class='txt'>{desc}</div></div>"
-            for icon, title, desc in cards
-        ) + "</div>",
-        unsafe_allow_html=True,
-    )
-
-
-with st.expander("❓ How this game works (and how the numbers are calculated)"):
-    st.markdown(
-        "Build a mix of asset classes with a weight and a fee for each, until you hit 100%. Hit "
-        "reveal and the tool tells you your probability of ruin - calculated by the exact same "
-        "engine the Mobius Wealth team uses for real clients, not a cut-down game version."
-    )
-
-    st.markdown("##### 🧮 How 'probability of ruin' is actually calculated")
-    _explainer_row([
-        ("🎯", "Real market history", "2,000 simulated retirements, built from REAL historical "
-         "monthly returns for every asset class you picked - not a straight-line '8% a year' guess."),
-        ("🧩", "Chunks, not shuffles", "A 'stationary block bootstrap' stitches together chunks of "
-         "real history, so genuine runs of good and bad markets stay intact instead of being "
-         "scrambled into nonsense."),
-        ("💷", "Fees & inflation, every year", "Your fee is deducted every single year for the "
-         "whole horizon, and spending is adjusted for real historical UK inflation - just like a "
-         "real plan."),
-        ("📉", "Lower = safer", "Probability of ruin is simply the share of those 2,000 futures "
-         "where the pot hits £0 before the plan was meant to end."),
-    ])
-
-    st.markdown("##### 🎛️ What actually moves your score")
-    _explainer_row([
-        ("⚖️", "Equities vs bonds vs cash", "Growth-focused assets raise your expected return, "
-         "but also widen the SPREAD of outcomes - great in good futures, painful in bad ones."),
-        ("💸", "Fees compound too", "Even a small-looking fee quietly drags your score down over "
-         "20-30 years, even with an identical asset mix."),
-        ("🌐", "Diversification", "Spreading across asset classes that don't all move together can "
-         "lower risk without giving up return - about as close as investing gets to a free lunch."),
-        ("📏", "The house rules", "Capped on both the number of asset classes and your overall "
-         "weighted fee - rewards a genuinely efficient mix, not just the highest historical return."),
-    ])
-
-    st.markdown("##### 🏅 Badges, crash tests & the leaderboard")
-    _explainer_row([
-        ("🎖️", "Badges", "Fun flair based on your finished mix (🎲 Risk Taker, 🛡️ Ultra Safe, "
-         "💰 Fee Hawk...) - hover any badge to see exactly what earns it."),
-        ("💥", "Crash tests", "Re-runs your EXACT portfolio starting from a real historical crisis, "
-         "using what actually happened next - not a fresh random draw."),
-        ("🏆", "Leaderboard", "Ranks everyone by probability of ruin, lowest (safest) first - "
-         "scores stay hidden until the host reveals them."),
-    ])
 
 # Shared reveal gate: the host controls a single "revealed" flag on the same singleton used for
 # the shared scenario (_host_state()), so submitting a portfolio computes and stores the score
@@ -1023,20 +1021,16 @@ with st.expander("⚙️ Game setup (host controls)", expanded=False):
             _h_age = st.number_input("Starting age", 40, 90, host_state["age"], key="host_age_in")
             _h_horizon = st.slider("Time horizon (years)", 5, 40, host_state["horizon"], key="host_horizon_in")
             _h_max_classes = st.number_input(
-                "Max asset classes a player can use", 1, 26, host_state["max_classes"], key="host_maxcls_in",
-                help="Forces harder trade-offs instead of just spreading weight across everything on offer.",
+                "Max asset classes a player can use", 1, len(GAME_BUCKETS), host_state["max_classes"],
+                key="host_maxcls_in",
+                help="Forces harder trade-offs instead of just spreading weight across everything on "
+                     f"offer. There are {len(GAME_BUCKETS)} asset classes in total.",
             )
         with c2:
             _h_pot = st.number_input("Starting pot (£)", 10_000, 10_000_000, host_state["pot"],
                                       step=10_000, key="host_pot_in")
             _h_spend = st.number_input("Desired annual spend (£)", 1_000, 500_000, host_state["spend"],
                                         step=1_000, key="host_spend_in")
-            _h_max_fee = st.number_input(
-                "Max weighted fee allowed (% pa)", 0.0, 3.0, host_state["max_fee_pct"],
-                step=0.01, key="host_maxfee_in",
-                help="A second constraint alongside the asset-class cap - forces a genuine cost-vs-"
-                     "diversification trade-off instead of just picking the priciest option everywhere.",
-            )
         st.divider()
         st.markdown("**🧾 Tax & State Pension**")
         _h_apply_tax = st.checkbox(
@@ -1065,7 +1059,7 @@ with st.expander("⚙️ Game setup (host controls)", expanded=False):
         if st.button("📡 Publish to all groups", type="primary", use_container_width=True):
             host_state.update(
                 age=_h_age, horizon=_h_horizon, pot=_h_pot, spend=_h_spend,
-                max_classes=_h_max_classes, max_fee_pct=_h_max_fee,
+                max_classes=_h_max_classes,
                 apply_tax=_h_apply_tax, sp_amount=_h_sp_amount, sp_age=_h_sp_age,
                 updated_at=datetime.now().strftime("%H:%M:%S"),
                 updated_by=host_name.strip() or "Host",
@@ -1091,13 +1085,12 @@ with st.expander("⚙️ Game setup (host controls)", expanded=False):
     else:
         st.caption("📡 No host scenario published yet - everyone's using the defaults below "
                     "until the host publishes one.")
-    _s1, _s2, _s3, _s4, _s5, _s6 = st.columns(6)
+    _s1, _s2, _s3, _s4, _s5 = st.columns(5)
     _s1.metric("Age", host_state["age"])
     _s2.metric("Horizon", f"{host_state['horizon']}y")
     _s3.metric("Pot", f"£{host_state['pot']:,.0f}")
     _s4.metric("Spend", f"£{host_state['spend']:,.0f}")
     _s5.metric("Max classes", host_state["max_classes"])
-    _s6.metric("Max fee", f"{host_state['max_fee_pct']:.2f}%")
     if host_state["apply_tax"]:
         st.caption(f"🧾 Tax & State Pension: **on** (£{host_state['sp_amount']:,.0f}/yr from age "
                    f"{host_state['sp_age']}) - spend above is treated as NET/take-home.")
@@ -1109,7 +1102,6 @@ with st.expander("⚙️ Game setup (host controls)", expanded=False):
     pot = host_state["pot"]
     spend = host_state["spend"]
     max_classes = host_state["max_classes"]
-    max_fee_pct = host_state["max_fee_pct"]
     apply_tax = host_state["apply_tax"]
     sp_amount = host_state["sp_amount"]
     sp_age = host_state["sp_age"]
@@ -1117,7 +1109,7 @@ with st.expander("⚙️ Game setup (host controls)", expanded=False):
 # Player mode vs host mode: nobody (host included) gets the actual portfolio builder until a
 # scenario has genuinely been published - before that there's nothing real to build against, so
 # everyone just sees how the game works while they wait. st.stop() halts the script right here for
-# this rerun; nothing below it (builder, cheat sheet, submit/reveal, leaderboard) executes.
+# this rerun; nothing below it (builder, submit/reveal, leaderboard) executes.
 if not host_state["updated_at"]:
     if is_host:
         # No auto-reload for the host's own tab: they're the one filling in the scenario form
@@ -1142,8 +1134,7 @@ if not host_state["updated_at"]:
             "<div class='fun-fact-banner' style='text-align:center; font-size:0.95rem; "
             "padding:1.2rem;'><span class='pulse-icon'>⏳</span> <b>Waiting for the host to publish "
             "today's scenario...</b><br>Once they hit '📡 Publish to all groups' above, hit the "
-            "button below to unlock your builder. Use the time to read <b>'How this game works'</b> "
-            "above if you haven't already.</div>",
+            "button below to unlock your builder.</div>",
             unsafe_allow_html=True,
         )
         if st.button("🔄 Check again", type="primary", use_container_width=True):
@@ -1164,13 +1155,13 @@ if host_state["updated_at"] != _last_seen_publish:
     else:
         st.toast("The host just updated the scenario - check the numbers above.", icon="🔄")
 
-# Fixed rather than a player-facing choice - the game used to also offer a broader "Fund store
-# categories" mode, dropped after event feedback that the individual building blocks (the finer
-# underlying asset-class series) is the one worth everyone's time. Kept as a plain constant
-# (rather than removing it from every session-state key below) purely for namespacing - it's what
-# every game_*/w_*/f_* key is suffixed with, harmless to keep even with only one mode now.
-granularity = "Individual building blocks"
-labels = list(AC.keys())
+# Fixed rather than a player-facing choice - the game used to offer several granularity modes
+# (fund-store categories, individual underlying series), all dropped after event feedback in
+# favour of the one consolidated bucket menu (GAME_BUCKETS). Kept as a plain constant purely for
+# namespacing - it's what every game_*/ws_*/wn_* session-state key is suffixed with, harmless to
+# keep with only one mode now.
+granularity = "Consolidated buckets"
+labels = list(GAME_BUCKETS.keys())
 result_key = f"game_result_{granularity}"
 
 if st.session_state.get(result_key) is None:
@@ -1194,10 +1185,10 @@ team_name = st.text_input("🏷️ Team / player name", key="team_name",
 team_display = team_name.strip()
 
 st.markdown("#### 🏗️ Your allocation")
-st.caption("Drag a slider for each asset class you want to hold (they must add up to 100%), and set "
-           "the annual fee you're assuming for each. Leave a slider at 0% to leave it out entirely. "
-           "New to this? Hover the **?** next to any slider for a plain-English explainer, or check "
-           "the cheat sheet below.")
+st.caption("Set a weight for each asset class you want to hold - drag the slider (2% steps) or "
+           "type an exact % in the box beside it. They must add up to 100%; leave one at 0% to "
+           "leave it out. Fees are fixed per asset class (a low-cost passive-fund assumption) - "
+           "hover the ⓘ next to any name for what it is, how risky it tends to be, and its fee.")
 
 if "game_fun_fact" not in st.session_state:
     st.session_state["game_fun_fact"] = random.choice(FUN_FACTS)
@@ -1206,58 +1197,56 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-with st.expander("📚 New here? Quick asset class cheat sheet"):
-    st.caption("What each asset class actually is, and roughly how risky it tends to be - "
-               "a simplified steer for this game, not investment advice.")
-    for _cs_label in labels:
-        _cs_info = ASSET_CLASS_INFO.get(_cs_label)
-        if _cs_info:
-            _cs_blurb, _cs_risk = _cs_info
-            st.markdown(
-                "<div class='cheat-sheet-row'>"
-                f"<div class='cs-head'><span class='cs-label'>{_cs_label}</span>"
-                f"<span class='cs-risk'>{_cs_risk}</span></div>"
-                f"<div class='cs-blurb'>{_cs_blurb}</div>"
-                "</div>",
-                unsafe_allow_html=True,
-            )
-
-weight_values, fee_values = [], []
-header_l, header_w, header_f = st.columns([2.5, 5.5, 1.5])
-with header_w:
-    st.caption("WEIGHT %")
-with header_f:
-    st.caption("FEE % PA")
+# Each row is a linked slider + number_input sharing one logical value. Streamlit widgets can't
+# share a key, so the slider (2% steps) and the box (any typed %) keep their own keys and each
+# has an on_change callback that mirrors its value onto the other; the number_input is treated as
+# the source of truth for the actual allocation (it carries the exact typed value, the slider
+# just snaps to the nearest even number for a clean coarse control).
+weight_values = []
+_hdr_l, _hdr_s, _hdr_n = st.columns([3, 5, 1.7])
+with _hdr_s:
+    st.caption("WEIGHT %  (2% STEPS)")
+with _hdr_n:
+    st.caption("TYPE %")
 for label in labels:
-    row_l, row_w, row_f = st.columns([2.5, 5.5, 1.5])
+    cfg = GAME_BUCKETS[label]
+    sld_key = f"ws_{granularity}_{label}"
+    num_key = f"wn_{granularity}_{label}"
+    st.session_state.setdefault(sld_key, 0.0)
+    st.session_state.setdefault(num_key, 0.0)
+
+    def _sync_from_slider(s=sld_key, n=num_key):
+        st.session_state[n] = st.session_state[s]
+
+    def _sync_from_num(s=sld_key, n=num_key):
+        st.session_state[s] = min(100.0, max(0.0, round(st.session_state[n] / 2.0) * 2.0))
+
+    row_l, row_s, row_n = st.columns([3, 5, 1.7])
     with row_l:
         # st.slider's own help="" tooltip icon gets display:none'd along with the label when
-        # label_visibility="collapsed" (verified in devtools - it's not just visually subtle,
-        # it's fully hidden), so the hint is rendered here instead as a plain HTML title
-        # attribute on a small info glyph next to the row's own label.
+        # label_visibility="collapsed", so the hint is rendered here instead as a plain HTML
+        # title attribute on a small info glyph next to the row's own label.
         _hint = _asset_help(label)
-        _hint_html = (f" <span style='opacity:0.5; cursor:help;' title='{html.escape(_hint)}'>ⓘ</span>"
-                      if _hint else "")
-        st.markdown(f"<div style='padding-top:0.6rem;'>{label}{_hint_html}</div>", unsafe_allow_html=True)
-    with row_w:
-        w = st.slider(label, 0.0, 100.0, 0.0, step=0.5, key=f"w_{granularity}_{label}",
-                       label_visibility="collapsed")
-    with row_f:
-        f = st.number_input(label, 0.0, 3.0, 0.10, step=0.01, key=f"f_{granularity}_{label}",
-                             label_visibility="collapsed")
-    weight_values.append(w)
-    fee_values.append(f)
+        _hint_full = f"{_hint}  •  Assumed fee: {cfg['fee'] * 100:.2f}% pa" if _hint else None
+        _hint_html = (f" <span style='opacity:0.55; cursor:help;' title='{html.escape(_hint_full)}'>ⓘ</span>"
+                      if _hint_full else "")
+        st.markdown(f"<div style='padding-top:0.55rem;'>{label}{_hint_html}</div>", unsafe_allow_html=True)
+    with row_s:
+        st.slider(label, 0.0, 100.0, step=2.0, key=sld_key, on_change=_sync_from_slider,
+                   label_visibility="collapsed")
+    with row_n:
+        st.number_input(label, 0.0, 100.0, step=2.0, key=num_key, on_change=_sync_from_num,
+                         label_visibility="collapsed")
+    weight_values.append(float(st.session_state[num_key]))
 
-edited = pd.DataFrame({"Asset class": labels, "Weight %": weight_values, "Fee % pa": fee_values})
+edited = pd.DataFrame({"Asset class": labels, "Weight %": weight_values})
 
 total_weight = float(edited["Weight %"].sum())
 selected_count = int((edited["Weight %"] > 0).sum())
-live_fee_pct = float((edited["Weight %"] * edited["Fee % pa"]).sum() / total_weight) if total_weight > 0 else 0.0
 weights_ok = abs(total_weight - 100.0) < 0.51
 count_ok = 0 < selected_count <= max_classes
-fee_ok = live_fee_pct <= max_fee_pct + 1e-9
 name_ok = bool(team_name.strip())
-can_reveal = weights_ok and count_ok and fee_ok and name_ok
+can_reveal = weights_ok and count_ok and name_ok
 
 if total_weight <= 0:
     build_stage = "⬜ Nothing built yet"
@@ -1287,16 +1276,13 @@ if _risk_read is not None:
     st.caption("A quick read on your mix as you build - not the real simulation, which only runs "
                "once you lock in your portfolio.")
 
-progress_col, count_col, fee_col, name_col = st.columns(4)
+progress_col, count_col, name_col = st.columns(3)
 with progress_col:
     _stat_card("Total allocated", f"{total_weight:.1f}% / 100%",
                COLOR_GOOD if weights_ok else None, icon="🧮")
 with count_col:
     _stat_card("Asset classes used", f"{selected_count} / {max_classes}",
                COLOR_GOOD if count_ok else COLOR_BAD if selected_count else None, icon="🧩")
-with fee_col:
-    _stat_card("Weighted fee", f"{live_fee_pct:.2f}% / {max_fee_pct:.2f}%",
-               COLOR_GOOD if fee_ok else COLOR_BAD if total_weight > 0 else None, icon="💷")
 with name_col:
     _stat_card("Team name", html.escape(team_display) if name_ok else "Not set yet",
                COLOR_GOOD if name_ok else COLOR_BAD, icon="🏷️")
@@ -1306,9 +1292,6 @@ if not weights_ok:
 if not count_ok and selected_count > 0:
     st.warning(f"You've used {selected_count} asset classes - the limit for this game is {max_classes}. "
                f"Zero out some rows to get under the limit.")
-if not fee_ok and total_weight > 0:
-    st.warning(f"Your weighted fee is {live_fee_pct:.2f}% pa - the limit for this game is "
-               f"{max_fee_pct:.2f}% pa. Swap in some cheaper asset classes.")
 if not name_ok:
     st.warning("Enter a team / player name above so your score can go on the leaderboard.")
 
@@ -1320,16 +1303,15 @@ reveal = st.button("🔒 Lock in my portfolio", type="primary",
 if reveal:
     rows = edited[edited["Weight %"] > 0]
     allocation_str = ", ".join(f"{r['Asset class']} {r['Weight %']:.0f}%" for _, r in rows.iterrows())
-    ac_vals, w_vals, fee_vals = [], [], []
-    for _, r in rows.iterrows():
-        ac_vals.append(r["Asset class"])
-        w_vals.append(r["Weight %"])
-        fee_vals.append(r["Fee % pa"])
 
-    weights = pd.Series(w_vals, index=ac_vals, dtype=float) / total_weight
-    weights = weights.groupby(level=0).sum()  # guards against two rows resolving to the same series
-    fees = pd.Series(fee_vals, index=ac_vals, dtype=float).groupby(level=0).mean() / 100.0
-    custom_fee = float((weights * fees.reindex(weights.index)).sum())
+    # Normalised player allocation across the consolidated buckets (sums to 1)...
+    bucket_weights = pd.Series(rows["Weight %"].values, index=rows["Asset class"].values, dtype=float)
+    bucket_weights = bucket_weights.groupby(level=0).sum() / total_weight
+    # ...the fixed per-bucket fees weighted by that allocation (players no longer set fees)...
+    custom_fee = _bucket_weighted_fee(bucket_weights)
+    # ...and the same allocation expanded back onto the underlying asset-class series the engine
+    # actually simulates on.
+    sim_weights = _expand_bucket_weights(bucket_weights)
 
     suspense_slot = st.empty()
     for msg in SUSPENSE_MESSAGES:
@@ -1340,7 +1322,7 @@ if reveal:
                              initial_annual_spend=float(spend), apply_tax=apply_tax,
                              state_pension_annual=float(sp_amount), state_pension_age=int(sp_age))
     result = run_simulation("Your portfolio", asset_df, cpi, profile, method="stationary_block",
-                             n_sims=2000, seed=42, custom_weights=weights, custom_fee=custom_fee)
+                             n_sims=2000, seed=42, custom_weights=sim_weights, custom_fee=custom_fee)
     suspense_slot.empty()
 
     median_return = _median_cagr(result.paths, float(pot), horizon)
@@ -1348,8 +1330,10 @@ if reveal:
     st.session_state[f"game_return_{granularity}"] = median_return
     st.session_state[f"game_fee_{granularity}"] = custom_fee
     st.session_state[f"game_paths_{granularity}"] = result.paths
-    st.session_state[f"game_weights_{granularity}"] = weights
-    st.session_state[f"game_badges_{granularity}"] = _badges(weights, custom_fee, selected_count, max_classes)
+    # Store the EXPANDED series weights - the crash re-test below feeds this straight back into
+    # run_simulation, which wants asset-class-series keys, not bucket names.
+    st.session_state[f"game_weights_{granularity}"] = sim_weights
+    st.session_state[f"game_badges_{granularity}"] = _badges(bucket_weights, custom_fee, selected_count, max_classes)
     _append_leaderboard({
         "Time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "Team": team_display,
