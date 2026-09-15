@@ -91,10 +91,11 @@ def portfolio_monthly_returns(name: str, asset_df: pd.DataFrame) -> pd.Series:
 
 
 def downside_stats(name: str, asset_df: pd.DataFrame, custom_weights=None, custom_fee=None) -> dict:
-    """Max DD (single worst peak-to-trough drawdown), Average DD (mean of the running drawdown
-    series - a 'typical' rather than worst-case figure), and CVaR at monthly and rolling-12m
-    horizons (average of the return series' own worst 5% tail). Shared by the app's PDF export and
-    the equity-income framework (single shares/baskets aren't always registered in PORTFOLIOS, so
+    """Max DD (single worst peak-to-trough drawdown), its duration in months, Average DD (mean of
+    the running drawdown series - a 'typical' rather than worst-case figure), and CVaR at monthly
+    and rolling-12m horizons (average of the return series' own worst 5% tail). Shared by the
+    app's PDF export, the Portfolio Builder Game's scoring formula, and the equity-income
+    framework (single shares/baskets aren't always registered in PORTFOLIOS, so
     custom_weights/custom_fee let a caller bypass the name lookup, mirroring run_simulation's own
     override convention)."""
     if custom_weights is not None:
@@ -110,6 +111,19 @@ def downside_stats(name: str, asset_df: pd.DataFrame, custom_weights=None, custo
         dd_series.append(dd)
     avg_dd = float(np.mean(dd_series))
 
+    # Duration (in months) of the drawdown EPISODE that reaches the single worst peak-to-trough
+    # fall above - the contiguous run of dd<0 containing that point, counted from when it first
+    # went underwater through to recovery (dd back to 0) or the end of the series if it never
+    # recovers within the sample (right-censored, not treated as an error).
+    worst_idx = int(np.argmin(dd_series))
+    dd_start = worst_idx
+    while dd_start > 0 and dd_series[dd_start - 1] < 0:
+        dd_start -= 1
+    dd_end = worst_idx
+    while dd_end < len(dd_series) - 1 and dd_series[dd_end + 1] < 0:
+        dd_end += 1
+    maxdd_duration_months = dd_end - dd_start + 1
+
     def cvar(series):
         s = pd.Series(series).dropna()
         threshold = np.percentile(s, 5)
@@ -117,7 +131,8 @@ def downside_stats(name: str, asset_df: pd.DataFrame, custom_weights=None, custo
         return float(tail.mean()) if len(tail) else float(threshold)
 
     rolling_12m = monthly.rolling(12).apply(lambda x: np.prod(1 + x) - 1, raw=True).dropna()
-    return dict(maxdd=worst_dd, avgdd=avg_dd, cvar_m=cvar(monthly), cvar_a=cvar(rolling_12m))
+    return dict(maxdd=worst_dd, maxdd_duration_months=maxdd_duration_months, avgdd=avg_dd,
+                cvar_m=cvar(monthly), cvar_a=cvar(rolling_12m))
 
 
 @dataclass

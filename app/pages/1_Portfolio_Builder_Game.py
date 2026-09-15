@@ -50,7 +50,8 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 import tax
-from engine import load_asset_returns, load_cpi, run_simulation, ClientProfile, downside_stats
+from engine import (load_asset_returns, load_cpi, run_simulation, ClientProfile, downside_stats,
+                     weighted_monthly_returns)
 from portfolios import AC, DATA_DIR
 
 st.set_page_config(page_title="Mobius Wealth - Portfolio Builder Game", layout="wide", page_icon="🎮")
@@ -511,8 +512,30 @@ components.html(
 GAME_STATE_DIR = Path(__file__).resolve().parent.parent.parent / "game_state"
 GAME_STATE_DIR.mkdir(exist_ok=True)
 LEADERBOARD_CSV = GAME_STATE_DIR / "leaderboard.csv"
-LEADERBOARD_COLUMNS = ["Time", "Team", "Mode", "Probability of ruin",
-                        "Fund growth %", "Asset classes used", "Allocation"]
+LEADERBOARD_COLUMNS = ["Time", "Team", "Mode", "Score", "Probability of ruin", "Max drawdown %",
+                        "Drawdown duration (months)", "Fund growth %", "Asset classes used", "Allocation"]
+
+# The leaderboard's actual ranking formula (lower = safer = ranks higher):
+#   Score = Probability of ruin  +  0.2 x Max Drawdown  +  0.05 x Drawdown Duration
+# All three terms are expressed as comparable PERCENTAGE-POINT figures before the weights are
+# applied - probability of ruin and max drawdown as a plain %, drawdown duration as a % of the
+# plan's own time horizon (not raw months) - so 0.2/0.05 read as genuine relative weights rather
+# than being swamped or dwarfed purely by a unit mismatch (e.g. a drawdown lasting "18 months"
+# would dominate a 0-100 percentage if left unnormalised). Max drawdown and duration both come
+# from downside_stats() - the SAME deterministic historical calculation (excluding withdrawals)
+# the main app's client summary PDF uses - not the Monte Carlo simulation, so they measure the
+# strategy's own bumpiness, not cash-flow-driven swings. This is one reasonable reading of the
+# formula, not the only one - flag it if raw (non-normalised) units were actually intended.
+SCORE_WEIGHTS = {"maxdd": 0.2, "maxdd_duration": 0.05}
+
+
+def _game_score(prob_ruin: float, dd_stats: dict, horizon_years: int) -> float:
+    maxdd_pct = abs(dd_stats["maxdd"]) * 100.0
+    duration_pct_of_horizon = (100.0 * dd_stats["maxdd_duration_months"] / (horizon_years * 12)
+                                if horizon_years > 0 else 0.0)
+    return (prob_ruin * 100.0
+            + SCORE_WEIGHTS["maxdd"] * maxdd_pct
+            + SCORE_WEIGHTS["maxdd_duration"] * duration_pct_of_horizon)
 
 SUSPENSE_MESSAGES = [
     "🎲 Testing your portfolio against 2,000 possible futures...",
@@ -598,17 +621,31 @@ def _leaderboard_mode() -> str:
             else "🟡 Local file only (resets on app restart/redeploy - see README)")
 
 
+def _backfill_leaderboard_schema(df: pd.DataFrame) -> pd.DataFrame:
+    """Rows written under an OLDER LEADERBOARD_COLUMNS shape (a persistent Google Sheet keeps
+    whatever header row it already has; a stale local CSV likewise) won't have every column this
+    version expects - e.g. "Score"/"Max drawdown %" didn't exist before the scoring formula was
+    added. Backfilling with a neutral default rather than letting a bare df["Score"] KeyError
+    means a schema change degrades gracefully (old rows just show 0/blank for the new columns,
+    sorting still works) instead of taking down the whole leaderboard for everyone mid-event."""
+    for col in LEADERBOARD_COLUMNS:
+        if col not in df.columns:
+            df[col] = "" if col in ("Time", "Team", "Mode", "Allocation") else 0.0
+    return df
+
+
 def _load_leaderboard() -> pd.DataFrame:
     ws = _gsheet_ws()
     if ws is not None:
         try:
             df = pd.DataFrame(ws.get_all_records())
-            return df if not df.empty else pd.DataFrame(columns=LEADERBOARD_COLUMNS)
+            return (_backfill_leaderboard_schema(df) if not df.empty
+                    else pd.DataFrame(columns=LEADERBOARD_COLUMNS))
         except Exception:
             pass  # fall through to the local file if the API call itself fails
     if LEADERBOARD_CSV.exists():
         try:
-            return pd.read_csv(LEADERBOARD_CSV)
+            return _backfill_leaderboard_schema(pd.read_csv(LEADERBOARD_CSV))
         except pd.errors.EmptyDataError:
             pass
     return pd.DataFrame(columns=LEADERBOARD_COLUMNS)
@@ -713,12 +750,16 @@ def _outcome_comment(median_outcome, starting_pot):
         return "🤑 Someone's leaving a very generous inheritance."
 
 
-def _tier(prob_ruin):
-    if prob_ruin < 0.05:
+def _tier(score_fraction):
+    """Verdict tier from the game's composite Score (see SCORE_WEIGHTS below), expressed as a
+    fraction (score_fraction = Score / 100) so these thresholds read the same as when this only
+    considered probability of ruin - the drawdown/duration terms just nudge a portfolio up or
+    down within that same 0-1-ish scale rather than needing new cutoffs of their own."""
+    if score_fraction < 0.05:
         return "Excellent", "🏆", COLOR_GOOD, "Retirement royalty. This plan just about never runs dry."
-    elif prob_ruin < 0.15:
+    elif score_fraction < 0.15:
         return "Good", "✅", COLOR_GOOD, "A solid, sensible plan. Nice work."
-    elif prob_ruin < 0.30:
+    elif score_fraction < 0.30:
         return "Risky", "⚠️", COLOR_WARN, "Living a little dangerously - some futures don't end well."
     else:
         return "High risk", "💀", COLOR_BAD, "Back to the drawing board - this pot runs out a lot."
@@ -1070,13 +1111,13 @@ else:
     _n_plays = len(_lb_for_banner)
     _n_teams = _lb_for_banner["Team"].nunique()
     _avg_ruin = _lb_for_banner["Probability of ruin"].mean()
-    _best_row = _lb_for_banner.loc[_lb_for_banner["Probability of ruin"].idxmin()]
+    _best_row = _lb_for_banner.loc[_lb_for_banner["Score"].idxmin()]
     st.markdown(
         "<div class='stats-banner'>"
         f"<span>🎲 {_n_plays} portfolio{'s' if _n_plays != 1 else ''} built</span>"
         f"<span>{_n_teams} team{'s' if _n_teams != 1 else ''} playing</span>"
         f"<span>📊 avg probability of ruin: {_avg_ruin:.1f}%</span>"
-        f"<span>🏆 best so far: {_best_row['Team']} ({_best_row['Probability of ruin']:.1f}%)</span>"
+        f"<span>🏆 best so far: {_best_row['Team']} (score {_best_row['Score']:.1f})</span>"
         "</div>",
         unsafe_allow_html=True,
     )
@@ -1374,13 +1415,27 @@ if _risk_read is not None:
     st.caption("A quick read on your mix as you build - not the real simulation, which only runs "
                "once you lock in your portfolio.")
 
-progress_col, count_col, name_col = st.columns(3)
+# Live, running fee cost as you build - weighted-average fee across whatever's allocated SO FAR
+# (needn't sum to 100 yet), converted to an indicative £/yr figure against the published pot size.
+# Purely a build-time steer (like the risk dial above); the authoritative figure is the "Annual
+# manager cost" stat in the results, computed from the actual locked-in 100% allocation.
+if total_weight > 0:
+    live_fee_pct = float(sum(w * GAME_BUCKETS[lbl]["fee"] for lbl, w in zip(labels, weight_values) if w > 0)
+                          / total_weight)
+else:
+    live_fee_pct = 0.0
+live_cost_per_year = live_fee_pct * float(pot)
+
+progress_col, count_col, cost_col, name_col = st.columns(4)
 with progress_col:
     _stat_card("Total allocated", f"{total_weight:.1f}% / 100%",
                COLOR_GOOD if weights_ok else None, icon="🧮")
 with count_col:
     _stat_card("Asset classes used", f"{selected_count} of {len(GAME_BUCKETS)} available",
                COLOR_GOOD if count_ok else None, icon="🧩")
+with cost_col:
+    _stat_card("Fee cost so far", f"£{live_cost_per_year:,.0f}/yr" if total_weight > 0 else "—",
+               icon="💷", comment=f"{live_fee_pct * 100:.2f}% weighted fee" if total_weight > 0 else None)
 with name_col:
     _stat_card("Team name", html.escape(team_display) if name_ok else "Not set yet",
                COLOR_GOOD if name_ok else COLOR_BAD, icon="🏷️")
@@ -1436,10 +1491,26 @@ if reveal:
     # this exact mix/fee (deterministic, not simulated) - the same downside_stats() the main app's
     # client summary PDF uses, so the numbers mean the same thing in both places.
     dd_stats = downside_stats("Your portfolio", asset_df, custom_weights=sim_weights, custom_fee=custom_fee)
+    # Annualised volatility - same deterministic-historical convention as app.py's own
+    # historical_stats()/build_final_summary_pdf.py (monthly std dev * sqrt(12)), not a simulated
+    # spread, so it's directly comparable to those.
+    _vol_monthly = weighted_monthly_returns(sim_weights, custom_fee, asset_df, label="Your portfolio").dropna()
+    volatility = float(_vol_monthly.std() * np.sqrt(12))
+    # The actual £/yr cost of this locked-in fee, on the published pot - the "annual manager cost"
+    # headline figure (distinct from the live build-time estimate above, which can be based on a
+    # partial, not-yet-100% allocation).
+    annual_cost = custom_fee * float(pot)
+    # The leaderboard's actual ranking number - see SCORE_WEIGHTS above for the formula and unit
+    # convention. Lower is still better/safer, same direction probability of ruin alone used to
+    # rank before.
+    score = _game_score(result.prob_ruin, dd_stats, horizon)
 
     st.session_state[result_key] = result.prob_ruin
+    st.session_state[f"game_score_{granularity}"] = score
     st.session_state[f"game_growth_{granularity}"] = fund_growth
     st.session_state[f"game_dd_{granularity}"] = dd_stats
+    st.session_state[f"game_vol_{granularity}"] = volatility
+    st.session_state[f"game_cost_{granularity}"] = annual_cost
     st.session_state[f"game_fee_{granularity}"] = custom_fee
     st.session_state[f"game_paths_{granularity}"] = result.paths
     # Store the EXPANDED series weights - the crash re-test below feeds this straight back into
@@ -1450,7 +1521,10 @@ if reveal:
         "Time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "Team": team_display,
         "Mode": granularity,
+        "Score": round(score, 2),
         "Probability of ruin": round(result.prob_ruin * 100, 2),
+        "Max drawdown %": round(abs(dd_stats["maxdd"]) * 100, 2),
+        "Drawdown duration (months)": dd_stats["maxdd_duration_months"],
         "Fund growth %": round(fund_growth * 100, 2),
         "Asset classes used": selected_count,
         "Allocation": allocation_str,
@@ -1524,7 +1598,7 @@ else:
         _crown_slot.empty()
         st.balloons()
 
-    ranked = leaderboard.sort_values("Probability of ruin").reset_index(drop=True)
+    ranked = leaderboard.sort_values("Score").reset_index(drop=True)
     medals = ["🥇", "🥈", "🥉"]
     ranked.insert(0, "Rank", [medals[i] if i < 3 else str(i + 1) for i in range(len(ranked))])
     current = team_display.strip().lower()
@@ -1546,10 +1620,12 @@ else:
         f"letter-spacing:0.08em; opacity:0.9;'>Champion portfolio</div>"
         f"<div class='champion-name'>{html.escape(str(winner['Team']))}</div>"
         f"<div class='champion-stats'>"
+        f"<div><div class='champion-stat-value'>{winner['Score']:.1f}</div>"
+        f"<div class='champion-stat-label'>Score (lower wins)</div></div>"
         f"<div><div class='champion-stat-value'>{winner['Probability of ruin']:.1f}%</div>"
         f"<div class='champion-stat-label'>Probability of ruin</div></div>"
-        f"<div><div class='champion-stat-value'>{winner['Fund growth %']:.1f}%</div>"
-        f"<div class='champion-stat-label'>Fund growth (no withdrawals)</div></div>"
+        f"<div><div class='champion-stat-value'>{winner['Max drawdown %']:.1f}%</div>"
+        f"<div class='champion-stat-label'>Max drawdown</div></div>"
         f"<div><div class='champion-stat-value'>{int(winner['Asset classes used'])}</div>"
         f"<div class='champion-stat-label'>Asset classes used</div></div>"
         f"</div></div>",
@@ -1581,13 +1657,13 @@ else:
     _rival_rows = ranked[ranked["Team"] != winner["Team"]]
     if not _rival_rows.empty:
         _rival = _rival_rows.iloc[0]
-        _gap = float(_rival["Probability of ruin"]) - float(winner["Probability of ruin"])
+        _gap = float(_rival["Score"]) - float(winner["Score"])
         if 0 <= _gap < 2.0:
             st.markdown(
                 f"<div class='fun-fact-banner' style='background:{PALE_PINK}; text-align:center; "
                 f"font-weight:600;'>🔥 Nail-biter! {html.escape(str(winner['Team']))} edged out "
-                f"{html.escape(str(_rival['Team']))} by just {_gap:.1f} percentage points of "
-                "probability of ruin.</div>",
+                f"{html.escape(str(_rival['Team']))} by just {_gap:.1f} points of "
+                "score.</div>",
                 unsafe_allow_html=True,
             )
 
@@ -1616,9 +1692,15 @@ if has_result and revealed:
         _reveal_slot.empty()
 
     prob_ruin = st.session_state[result_key]
+    score = st.session_state.get(f"game_score_{granularity}", prob_ruin * 100.0)
     st.divider()
     st.markdown("### 🔎 Your result, in detail")
-    tier, emoji, color, tagline = _tier(prob_ruin)
+    # Tier/verdict now reflects the full Score (probability of ruin + drawdown + duration - see
+    # SCORE_WEIGHTS), not probability of ruin alone, so it can't disagree with where this
+    # portfolio actually lands on the leaderboard. The big flashy number stays probability of
+    # ruin though - it's still the single most intuitive figure for a non-specialist reading a
+    # reveal card; the Final scorecard just below shows Score itself explicitly.
+    tier, emoji, color, tagline = _tier(score / 100.0)
     st.markdown(
         f"<div class='result-card' style='background:linear-gradient(135deg, {color}, {color}cc);'>"
         f"<div style='font-size:0.9rem; font-weight:700; text-transform:uppercase; "
@@ -1631,6 +1713,31 @@ if has_result and revealed:
     )
     if prob_ruin < 0.15:
         st.balloons()
+
+    # The headline numbers together, right under the big reveal card: Score (the actual
+    # leaderboard ranking number - see SCORE_WEIGHTS above), then its three ingredients -
+    # probability of ruin, max drawdown (how bumpy the ride actually was, historically, excluding
+    # withdrawals - see downside_stats() below for the fuller breakdown) - and the real £/yr cost
+    # of the fee this team chose to pay. Everything else on this page is detail; this row is the
+    # actual "so what" a non-specialist takes away.
+    _final_dd = st.session_state.get(f"game_dd_{granularity}")
+    _final_fee = st.session_state.get(f"game_fee_{granularity}", 0.0)
+    _final_cost = st.session_state.get(f"game_cost_{granularity}", 0.0)
+    st.markdown("#### 🏁 Final scorecard")
+    st.caption("Score is what the leaderboard actually ranks on - probability of ruin + "
+               f"{SCORE_WEIGHTS['maxdd']:.2f} x max drawdown + {SCORE_WEIGHTS['maxdd_duration']:.2f} x "
+               "drawdown duration (as a % of your time horizon). Lower is safer.")
+    sc1, sc2, sc3, sc4 = st.columns(4)
+    with sc1:
+        _stat_card("Score", f"{score:.1f}", color, icon="🏁", comment="Lower = safer")
+    with sc2:
+        _stat_card("Probability of ruin", f"{prob_ruin * 100:.1f}%", color, icon="💀")
+    with sc3:
+        _stat_card("Max drawdown", f"{_final_dd['maxdd'] * 100:.1f}%" if _final_dd else "—",
+                   COLOR_BAD, icon="📉", comment="Worst peak-to-trough fall, excluding withdrawals")
+    with sc4:
+        _stat_card("Annual manager cost", f"£{_final_cost:,.0f}/yr", icon="💷",
+                   comment=f"{_final_fee * 100:.2f}% weighted fee on £{float(pot):,.0f}")
 
     st.markdown("#### 💥 Would your portfolio have survived...?")
     st.caption("Click a real historical crisis to re-test the SAME portfolio you just built, "
@@ -1673,10 +1780,12 @@ if has_result and revealed:
                 _crash_series = [("You", _verdict_color, _crash_paths)]
                 _crash_fig = go.Figure()
                 for _cs_label, _cs_color, _cs_paths in _crash_series:
-                    _cq25, _cq50, _cq75 = (np.percentile(_cs_paths, q, axis=0) for q in (25, 50, 75))
-                    _crash_fig.add_trace(go.Scatter(x=_crash_years_axis, y=_cq75, line=dict(width=0),
+                    # 10th-90th percentile (an 80% range) rather than the old 25th-75th (50%) -
+                    # a genuine downside/upside view, not just the typical spread.
+                    _cq10, _cq50, _cq90 = (np.percentile(_cs_paths, q, axis=0) for q in (10, 50, 90))
+                    _crash_fig.add_trace(go.Scatter(x=_crash_years_axis, y=_cq90, line=dict(width=0),
                                                      showlegend=False, hoverinfo="skip"))
-                    _crash_fig.add_trace(go.Scatter(x=_crash_years_axis, y=_cq25, fill="tonexty",
+                    _crash_fig.add_trace(go.Scatter(x=_crash_years_axis, y=_cq10, fill="tonexty",
                                                      line=dict(width=0), showlegend=False, hoverinfo="skip",
                                                      fillcolor=_hex_to_rgba(_cs_color, 0.18)))
                     _crash_fig.add_trace(go.Scatter(x=_crash_years_axis, y=_cq50, mode="lines",
@@ -1691,13 +1800,17 @@ if has_result and revealed:
                                  key=f"crash_chart_{granularity}_{_label}")
 
     fund_growth = st.session_state.get(f"game_growth_{granularity}", 0.0)
+    volatility = st.session_state.get(f"game_vol_{granularity}", 0.0)
     median_outcome = float(np.median(st.session_state[f"game_paths_{granularity}"][:, -1]))
-    return_col1, return_col2 = st.columns(2)
+    return_col1, return_col2, return_col3 = st.columns(3)
     with return_col1:
         _stat_card("Fund growth (no withdrawals)", f"{fund_growth * 100:+.1f}%",
                    COLOR_GOOD if fund_growth >= 0 else COLOR_BAD, icon="📈",
                    comment=_growth_comment(fund_growth))
     with return_col2:
+        _stat_card("Volatility (annualised)", f"{volatility * 100:.1f}%", COLOR_WARN, icon="🎢",
+                   comment="How much this mix's returns have bounced around, historically")
+    with return_col3:
         _stat_card("Legacy left behind", f"£{median_outcome:,.0f}", icon="🏺",
                    comment=_outcome_comment(median_outcome, float(pot)))
 
@@ -1728,17 +1841,20 @@ if has_result and revealed:
         st.markdown("#### 📉 Downside risk")
         st.caption("How bumpy this exact mix has actually been historically - excluding "
                    "withdrawals, so this is the strategy's own ride, not the retirement drawdown.")
-        dd_col1, dd_col2, dd_col3, dd_col4 = st.columns(4)
+        dd_col1, dd_col2, dd_col3, dd_col4, dd_col5 = st.columns(5)
         with dd_col1:
             _stat_card("Max drawdown", f"{dd_stats['maxdd'] * 100:.1f}%", COLOR_BAD, icon="📉",
                        comment="Worst peak-to-trough fall")
         with dd_col2:
+            _stat_card("Drawdown duration", f"{dd_stats['maxdd_duration_months']} mo", COLOR_WARN,
+                       icon="⏱️", comment="Months in that worst drawdown episode")
+        with dd_col3:
             _stat_card("Average drawdown", f"{dd_stats['avgdd'] * 100:.1f}%", COLOR_WARN, icon="〰️",
                        comment="Typical dip, not just the worst one")
-        with dd_col3:
+        with dd_col4:
             _stat_card("CVaR 95 (monthly)", f"{dd_stats['cvar_m'] * 100:.1f}%", COLOR_WARN, icon="🎯",
                        comment="Avg of the worst 5% of months")
-        with dd_col4:
+        with dd_col5:
             _stat_card("CVaR 95 (annual)", f"{dd_stats['cvar_a'] * 100:.1f}%", COLOR_WARN, icon="🎯",
                        comment="Avg of the worst 5% of rolling years")
 
@@ -1754,14 +1870,15 @@ if has_result and revealed:
 
     st.markdown("#### 📊 How your pot could evolve")
     st.caption("Interactive - hover for exact values, drag to zoom. The bold line is the median "
-               "(typical) simulated outcome; the shaded band is the middle 50% of simulated futures.")
+               "(typical) simulated outcome; the shaded band is the middle 80% of simulated futures "
+               "(10th-90th percentile) - a genuine downside/upside view, not just the typical spread.")
     fan = go.Figure()
     _fan_color = COLOR_GOOD if prob_ruin < 0.15 else COLOR_WARN if prob_ruin < 0.30 else COLOR_BAD
     _fan_paths = st.session_state[f"game_paths_{granularity}"]
     years_axis = np.arange(horizon + 1)
-    q25, q50, q75 = (np.percentile(_fan_paths, q, axis=0) for q in (25, 50, 75))
-    fan.add_trace(go.Scatter(x=years_axis, y=q75, line=dict(width=0), showlegend=False, hoverinfo="skip"))
-    fan.add_trace(go.Scatter(x=years_axis, y=q25, fill="tonexty", line=dict(width=0), showlegend=False,
+    q10, q50, q90 = (np.percentile(_fan_paths, q, axis=0) for q in (10, 50, 90))
+    fan.add_trace(go.Scatter(x=years_axis, y=q90, line=dict(width=0), showlegend=False, hoverinfo="skip"))
+    fan.add_trace(go.Scatter(x=years_axis, y=q10, fill="tonexty", line=dict(width=0), showlegend=False,
                               hoverinfo="skip", fillcolor=_hex_to_rgba(_fan_color, 0.18)))
     fan.add_trace(go.Scatter(x=years_axis, y=q50, mode="lines", name="You",
                               line=dict(width=3, color=_fan_color)))

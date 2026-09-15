@@ -98,10 +98,14 @@ Two pages, one Streamlit app, both reading the same `data/` and `src/`:
   for the full list, renames and rationale), in any combination (no cap on how many), each a
   fixed blend of the same underlying series the main app uses with a fixed, visible-but-not-editable
   fee per class. Hit reveal and see the headline probability of ruin plus fund growth (the same
-  mix/fee simulated with no withdrawals) and downside-risk stats (Max/Average Drawdown, CVaR — the
-  same `downside_stats()` the main app's client summary PDF uses) — plus a shared cross-device
-  leaderboard, badges, historical crash-test buttons, and an interactive fan chart of their own
-  pot's simulated range. Built for a live company-wide activity, not client use. (The asset-class
+  mix/fee simulated with no withdrawals) and downside-risk stats (Max/Average Drawdown, drawdown
+  duration, CVaR — the same `downside_stats()` the main app's client summary PDF uses) — plus a
+  shared cross-device leaderboard, badges, historical crash-test buttons, and an interactive fan
+  chart of their own pot's simulated range. **The leaderboard ranks on a composite Score, not
+  probability of ruin alone** — `Score = Probability of ruin + 0.2 × Max Drawdown + 0.05 ×
+  Drawdown Duration` (see `SCORE_WEIGHTS`/`_game_score()` in that file for the exact unit
+  convention - all three terms are normalised to comparable percentage-point figures before the
+  weights are applied). Built for a live company-wide activity, not client use. (The asset-class
   menu has moved back and forth between this curated per-holding list and a more heavily
   consolidated ~7-bucket version across iterations, and earlier versions also had player-set
   per-row fees, capped how many asset classes a player could use, offered a broader "fund store
@@ -444,6 +448,14 @@ judgement calls, not settled facts.
   the other. The Google Sheets path doesn't have this problem (`append_row` is a single atomic
   API call) — **confirm Sheets is actually configured before any session with more than a
   handful of simultaneous groups.**
+- **If a persistent Google Sheet is already in use and `LEADERBOARD_COLUMNS` changes** (as it did
+  when the Score/Max Drawdown/Drawdown Duration columns were added) — the Sheet keeps whatever
+  header row it already has; new rows still get written correctly (`_append_leaderboard` writes
+  by column NAME, not position), but the Sheet's own header won't show the new column names until
+  it's cleared/re-created. `_load_leaderboard()` backfills any columns missing from what it reads
+  (old rows just show 0/blank for new ones) so this degrades gracefully rather than crashing the
+  page, but **clear the leaderboard (or the Sheet) after a schema-changing update** for a clean
+  header row.
 - **Not load-tested at 20-30 concurrent groups.** Streamlit Community Cloud runs the app as a
   single process/single CPU core; each reveal runs a 2,000-path Monte Carlo simulation
   (`run_simulation`, `method="stationary_block"`), which is real CPU work, not I/O-bound — if
