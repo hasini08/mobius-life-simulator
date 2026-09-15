@@ -44,10 +44,12 @@ def game_buckets(game_tree):
     return _extract_module_level_dict(game_tree, "GAME_BUCKETS")
 
 
-def test_there_is_a_small_handful_of_buckets(game_buckets):
-    """The whole point of the consolidated menu is that it's short - if this ever creeps back up
-    towards the main app's full list, something has gone wrong."""
-    assert 3 <= len(game_buckets) <= 10, f"expected a short bucket menu, got {len(game_buckets)}"
+def test_there_is_a_curated_handful_of_buckets(game_buckets):
+    """A sanity bound, not a design target - the list has moved between a heavily consolidated
+    ~7-bucket menu and a more granular curated one (currently 16, one per named holding) across
+    iterations; this just catches it silently creeping all the way back up to the main app's full
+    ~26-series list (portfolios.AC), which would defeat the point of curating a menu at all."""
+    assert 3 <= len(game_buckets) <= 20, f"expected a curated bucket menu, got {len(game_buckets)}"
 
 
 def test_every_bucket_is_well_formed(game_buckets):

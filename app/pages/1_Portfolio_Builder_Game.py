@@ -50,7 +50,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 import tax
-from engine import load_asset_returns, load_cpi, run_simulation, ClientProfile
+from engine import load_asset_returns, load_cpi, run_simulation, ClientProfile, downside_stats
 from portfolios import AC, DATA_DIR
 
 st.set_page_config(page_title="Mobius Wealth - Portfolio Builder Game", layout="wide", page_icon="🎮")
@@ -512,7 +512,7 @@ GAME_STATE_DIR = Path(__file__).resolve().parent.parent.parent / "game_state"
 GAME_STATE_DIR.mkdir(exist_ok=True)
 LEADERBOARD_CSV = GAME_STATE_DIR / "leaderboard.csv"
 LEADERBOARD_COLUMNS = ["Time", "Team", "Mode", "Probability of ruin",
-                        "Median annual return %", "Asset classes used", "Allocation"]
+                        "Fund growth %", "Asset classes used", "Allocation"]
 
 SUSPENSE_MESSAGES = [
     "🎲 Testing your portfolio against 2,000 possible futures...",
@@ -648,7 +648,6 @@ def _host_state() -> dict:
     Google Sheets backend as the leaderboard instead."""
     return {
         "age": 65, "horizon": 30, "pot": 500_000, "spend": 20_000,
-        "max_classes": 5,
         # Tax & State Pension - off by default (matches the main app's own default), a purely
         # optional "fun side thing" the host can switch on for a group that wants the extra
         # realism. When on, "Desired annual spend" is treated as NET (take-home), same convention
@@ -680,8 +679,8 @@ def _stat_card(label, value, color=None, icon=None, comment=None):
     )
 
 
-def _return_comment(median_return):
-    pct = median_return * 100
+def _growth_comment(fund_growth):
+    pct = fund_growth * 100
     if pct < -2:
         return "😬 Shrinking faster than milk left out overnight."
     elif pct < 0:
@@ -725,69 +724,148 @@ def _tier(prob_ruin):
         return "High risk", "💀", COLOR_BAD, "Back to the drawing board - this pot runs out a lot."
 
 
-# The game's consolidated asset-class menu. The main app exposes all ~26 individual underlying
-# series (portfolios.AC); event feedback was that that's far too many sliders for a quick group
-# game, so here players pick from these 7 broad buckets instead. Each bucket is a FIXED blend of
-# one or more of those same underlying series (the `series` sub-weights must sum to 1.0), so the
-# simulation still runs on the real data via the exact same engine - _expand_bucket_weights()
-# below turns a bucket allocation back into the AC-series vector run_simulation expects.
+# The game's asset-class menu - a curated 16-class list handed over asset-by-asset (see the
+# "asset classes" thread), a deliberate step back from an earlier, more heavily consolidated
+# 7-bucket version: fewer generic blended buckets, more of the ACTUAL named holdings the main app
+# already tracks. Each bucket is still a FIXED blend of one or more portfolios.AC series (the
+# `series` sub-weights must sum to 1.0) - here every bucket happens to be a single series, but the
+# machinery supports a blend if a future list ever wants one - so the simulation still runs on the
+# real data via the exact same engine; _expand_bucket_weights() below turns a bucket allocation
+# back into the AC-series vector run_simulation expects.
 #
-# `fee` is the assumed all-in annual fund fee for that bucket - players no longer set fees
-# themselves (removed with the old per-row fee inputs and the host "max fee" cap); the game just
-# assumes a sensible low-cost passive fee for each, weighted by the player's allocation.
+# Two renames from the underlying AC label to a clearer display name, per that same thread:
+#   - "Global Agg Bonds" (the AC series - NOT the differently-sourced AC series literally called
+#     "Global Bonds", which this list doesn't use at all) is shown to players as "Global Bonds".
+#   - "Eq Gbl DM Novum Mgd Vol" is shown as "Berenberg / Protected Equities" - confirmed (not a
+#     proxy) as the same real holding by src/migrate_better_v4_into_main_data.py, which is also
+#     where this series entered the main data set. It's a DIFFERENT series from "Eq Gbl DM Min vol
+#     Gross" below (a similarly-named but distinct min-vol factor series) - the two are easy to
+#     confuse but are genuinely different data.
+#
+# There is deliberately no "Cash" option on this list (unlike the previous 7-bucket version) - a
+# real design choice carried over from that thread, not an oversight: every player takes on some
+# market/credit risk.
+#
+# `fee` is the assumed all-in annual fund fee for that bucket - players don't set fees themselves
+# (view-only, shown next to each name); these are illustrative fee-by-asset-type assumptions, not
+# sourced from a real fee schedule - swap in real numbers whenever they're available. (Mobius's
+# own real "Better" portfolio actually runs on one FLAT 7bps fee across every holding, per
+# src/migrate_better_v4_into_main_data.py's FLAT_MOBIUS_FEE - deliberately NOT reused here, since
+# the game's whole "fees compound too" point depends on fees actually varying by asset class.)
 #
 # `risk` must start with one of 🟢/🟡/🔴 - the live risk dial, the slider "i" tooltips and the
 # test suite all key off that first character. Risk tiers are a simplified general steer for the
 # game, not advice.
 GAME_BUCKETS: dict = {
-    "Global shares": {
+    "Global Equities": {
         "series": {"Global Equities": 1.0},
         "fee": 0.0012,
         "risk": "🔴 Higher risk",
         "blurb": "Shares in large companies across developed markets worldwide - the main engine "
                  "of long-term growth, and the bumpiest ride.",
     },
-    "Emerging-market shares": {
+    "EM Equities": {
         "series": {"EM Equities": 1.0},
-        "fee": 0.0022,
+        "fee": 0.0020,
         "risk": "🔴 Higher risk",
         "blurb": "Shares in companies from developing economies (China, India, Brazil...) - "
                  "higher growth potential, wider swings than developed-market shares.",
     },
-    "Government bonds": {
-        "series": {"UK Gilts All Stocks": 0.70, "US Treasuries 20yr+": 0.30},
-        "fee": 0.0010,
+    "Developed Market Quality Equities": {
+        "series": {"Eq Gbl DM Quality Gross": 1.0},
+        "fee": 0.0030,
         "risk": "🟡 Medium risk",
-        "blurb": "Loans to the UK and US governments - a core defensive holding, though prices "
-                 "still fall when interest rates rise.",
+        "blurb": "Developed-market shares in financially strong 'quality' companies - a steadier "
+                 "equity style than the broad market.",
     },
-    "Index-linked gilts": {
+    "Developed Markets Minimum Vol Equities": {
+        "series": {"Eq Gbl DM Min vol Gross": 1.0},
+        "fee": 0.0030,
+        "risk": "🟡 Medium risk",
+        "blurb": "Developed-market shares specifically selected to minimise volatility - still "
+                 "equity risk, just a smoother ride than the broad market.",
+    },
+    "Berenberg / Protected Equities": {
+        "series": {"Eq Gbl DM Novum Mgd Vol": 1.0},
+        "fee": 0.0045,
+        "risk": "🟡 Medium risk",
+        "blurb": "Mobius's real Berenberg / Protected Equities holding - developed-market shares "
+                 "actively managed to reduce volatility and cushion the downside.",
+    },
+    "UK Index-Linked Gilts": {
         "series": {"UK Index-Linked Gilts": 1.0},
         "fee": 0.0012,
         "risk": "🟢 Lower risk",
         "blurb": "UK government bonds whose value rises with inflation - protection for spending "
                  "power rather than a growth play.",
     },
-    "Corporate bonds & credit": {
-        "series": {"Global Bonds": 0.60, "Securitised Credit": 0.40},
-        "fee": 0.0018,
+    "Global Bonds": {
+        "series": {"Global Agg Bonds": 1.0},
+        "fee": 0.0015,
         "risk": "🟡 Medium risk",
-        "blurb": "Loans to companies, plus pools of loans like mortgages packaged up - more "
-                 "income than government bonds, in exchange for more risk.",
+        "blurb": "A broad global mix of investment-grade government and corporate bonds.",
     },
-    "Real assets": {
-        "series": {"REITs": 0.40, "Infrastructure": 0.35, "Commodities": 0.25},
-        "fee": 0.0035,
+    "UK Gilts 15yr+": {
+        "series": {"UK Gilts 15yr+": 1.0},
+        "fee": 0.0010,
         "risk": "🟡 Medium risk",
-        "blurb": "Property, infrastructure and commodities - real-world assets that often hold "
-                 "their value better than shares or bonds when inflation is high.",
+        "blurb": "Long-dated UK government bonds - more sensitive to interest rate changes than "
+                 "short-dated gilts.",
     },
-    "Cash": {
-        "series": {"Cash": 1.0},
-        "fee": 0.0005,
+    "UK Gilts <5yr": {
+        "series": {"UK Gilts <5yr": 1.0},
+        "fee": 0.0010,
         "risk": "🟢 Lower risk",
-        "blurb": "Bank deposits and equivalents - the steadiest holding, but returns rarely beat "
-                 "inflation over long periods.",
+        "blurb": "Short-dated UK government bonds - lower interest-rate risk than longer gilts.",
+    },
+    "Securitised Credit": {
+        "series": {"Securitised Credit": 1.0},
+        "fee": 0.0020,
+        "risk": "🟡 Medium risk",
+        "blurb": "Bundles of loans (like mortgages) packaged into tradeable securities - extra "
+                 "yield in exchange for extra complexity.",
+    },
+    "US HY Corp Bond": {
+        "series": {"US HY Corp Bond": 1.0},
+        "fee": 0.0025,
+        "risk": "🔴 Higher risk",
+        "blurb": "US 'high yield' corporate bonds - higher interest income for taking on more "
+                 "default risk.",
+    },
+    "REITs": {
+        "series": {"REITs": 1.0},
+        "fee": 0.0030,
+        "risk": "🟡 Medium risk",
+        "blurb": "Real Estate Investment Trusts - listed companies that own and manage property, "
+                 "paying out rental income.",
+    },
+    "Infrastructure": {
+        "series": {"Infrastructure": 1.0},
+        "fee": 0.0030,
+        "risk": "🟡 Medium risk",
+        "blurb": "Investments in things like toll roads, airports and utilities - steady, "
+                 "essential-service cash flows.",
+    },
+    "Commodities": {
+        "series": {"Commodities": 1.0},
+        "fee": 0.0025,
+        "risk": "🔴 Higher risk",
+        "blurb": "Raw materials like oil, gold and crops. Prices swing with global supply/demand "
+                 "and inflation.",
+    },
+    "Hedge Fund Credit Suisse": {
+        "series": {"Hedge Fund Credit Suisse": 1.0},
+        "fee": 0.0075,
+        "risk": "🟡 Medium risk",
+        "blurb": "A hedge fund strategy index - aims for returns less tied to normal market ups "
+                 "and downs.",
+    },
+    "Hedge Fund Trend": {
+        "series": {"HF Trend": 1.0},
+        "fee": 0.0075,
+        "risk": "🟡 Medium risk",
+        "blurb": "A 'trend following' hedge fund strategy - aims to profit from sustained price "
+                 "trends in either direction.",
     },
 }
 
@@ -817,12 +895,15 @@ for _b, _cfg in GAME_BUCKETS.items():
 
 
 # Badge groupings, in the same bucket-label terms _badges() receives its `weights` in.
-_GAME_EQUITY_BUCKETS = {"Global shares", "Emerging-market shares"}
-_GAME_OVERSEAS_BUCKETS = {"Emerging-market shares"}
-_GAME_ALT_BUCKETS = {"Real assets"}
+_GAME_EQUITY_BUCKETS = {
+    "Global Equities", "EM Equities", "Developed Market Quality Equities",
+    "Developed Markets Minimum Vol Equities", "Berenberg / Protected Equities",
+}
+_GAME_OVERSEAS_BUCKETS = {"EM Equities"}
+_GAME_ALT_BUCKETS = {"REITs", "Infrastructure", "Commodities", "Hedge Fund Credit Suisse", "Hedge Fund Trend"}
 
 
-def _badges(weights, custom_fee, selected_count, max_classes):
+def _badges(weights, custom_fee, selected_count):
     """Flair tags based on HOW a portfolio was built, not the score - separate from the tier
     verdict (which is purely about the outcome), these reward specific construction choices."""
     equity_weight = float(weights[weights.index.isin(_GAME_EQUITY_BUCKETS)].sum())
@@ -838,7 +919,7 @@ def _badges(weights, custom_fee, selected_count, max_classes):
         tags.append("⚖️ Balanced")
     if custom_fee <= 0.0012:
         tags.append("💰 Fee Hawk")
-    if selected_count == max_classes:
+    if selected_count == len(GAME_BUCKETS):
         tags.append("🌐 Diversifier")
     if max_single >= 0.95:
         tags.append("🎰 All In")
@@ -853,15 +934,16 @@ def _badges(weights, custom_fee, selected_count, max_classes):
 # earn their keep by being read, not just collected. Keys must match _badges()'s tag strings
 # exactly (emoji + label).
 BADGE_MEANINGS = {
-    "🎲 Risk Taker": "80%+ in shares (global + emerging market). Bold. Reckless. Possibly both.",
-    "🛡️ Ultra Safe": "20% or less in shares. Sleeps very soundly at night.",
-    "⚖️ Balanced": "35-65% in shares. The have-your-cake-and-eat-it portfolio.",
+    "🎲 Risk Taker": "80%+ in equities (any of the 5 equity classes). Bold. Reckless. Possibly both.",
+    "🛡️ Ultra Safe": "20% or less in equities. Sleeps very soundly at night.",
+    "⚖️ Balanced": "35-65% in equities. The have-your-cake-and-eat-it portfolio.",
     "💰 Fee Hawk": "Weighted fee 0.12% pa or lower - built from the cheapest, simplest building blocks.",
-    "🌐 Diversifier": "Used every asset class the cap allowed. Didn't leave a single one on the table.",
+    "🌐 Diversifier": "Used every single asset class on offer. Didn't leave one on the table.",
     "🎰 All In": "95%+ in a single asset class. Full send, no plan B.",
-    "🌍 Globe Trotter": "30%+ in emerging-market shares. Passport fully stamped.",
-    "💎 Alternative Investor": "15%+ in real assets (property, infrastructure, commodities). "
-                                "Too cool for plain stocks and bonds.",
+    "🌍 Globe Trotter": "30%+ in EM Equities. Passport fully stamped.",
+    "💎 Alternative Investor": "15%+ in real assets and hedge fund strategies (REITs, Infrastructure, "
+                                "Commodities, Hedge Fund Credit Suisse, Hedge Fund Trend). Too cool for "
+                                "plain stocks and bonds.",
 }
 
 
@@ -1020,12 +1102,6 @@ with st.expander("⚙️ Game setup (host controls)", expanded=False):
         with c1:
             _h_age = st.number_input("Starting age", 40, 90, host_state["age"], key="host_age_in")
             _h_horizon = st.slider("Time horizon (years)", 5, 40, host_state["horizon"], key="host_horizon_in")
-            _h_max_classes = st.number_input(
-                "Max asset classes a player can use", 1, len(GAME_BUCKETS), host_state["max_classes"],
-                key="host_maxcls_in",
-                help="Forces harder trade-offs instead of just spreading weight across everything on "
-                     f"offer. There are {len(GAME_BUCKETS)} asset classes in total.",
-            )
         with c2:
             _h_pot = st.number_input("Starting pot (£)", 10_000, 10_000_000, host_state["pot"],
                                       step=10_000, key="host_pot_in")
@@ -1059,7 +1135,6 @@ with st.expander("⚙️ Game setup (host controls)", expanded=False):
         if st.button("📡 Publish to all groups", type="primary", use_container_width=True):
             host_state.update(
                 age=_h_age, horizon=_h_horizon, pot=_h_pot, spend=_h_spend,
-                max_classes=_h_max_classes,
                 apply_tax=_h_apply_tax, sp_amount=_h_sp_amount, sp_age=_h_sp_age,
                 updated_at=datetime.now().strftime("%H:%M:%S"),
                 updated_by=host_name.strip() or "Host",
@@ -1085,12 +1160,11 @@ with st.expander("⚙️ Game setup (host controls)", expanded=False):
     else:
         st.caption("📡 No host scenario published yet - everyone's using the defaults below "
                     "until the host publishes one.")
-    _s1, _s2, _s3, _s4, _s5 = st.columns(5)
+    _s1, _s2, _s3, _s4 = st.columns(4)
     _s1.metric("Age", host_state["age"])
     _s2.metric("Horizon", f"{host_state['horizon']}y")
     _s3.metric("Pot", f"£{host_state['pot']:,.0f}")
     _s4.metric("Spend", f"£{host_state['spend']:,.0f}")
-    _s5.metric("Max classes", host_state["max_classes"])
     if host_state["apply_tax"]:
         st.caption(f"🧾 Tax & State Pension: **on** (£{host_state['sp_amount']:,.0f}/yr from age "
                    f"{host_state['sp_age']}) - spend above is treated as NET/take-home.")
@@ -1101,7 +1175,6 @@ with st.expander("⚙️ Game setup (host controls)", expanded=False):
     horizon = host_state["horizon"]
     pot = host_state["pot"]
     spend = host_state["spend"]
-    max_classes = host_state["max_classes"]
     apply_tax = host_state["apply_tax"]
     sp_amount = host_state["sp_amount"]
     sp_age = host_state["sp_age"]
@@ -1180,15 +1253,27 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-team_name = st.text_input("🏷️ Team / player name", key="team_name",
-                           help="Shown on the leaderboard - pick something your team will recognise.")
+# Made deliberately hard to miss (its own heading, a placeholder showing the expected shape of an
+# answer, and an inline nudge the instant the field is empty) after feedback that it read as just
+# another minor field and got skipped - it's the one thing every other screen in the game (the
+# leaderboard, the reveal, the champion card) keys off, so a blank one is a real dead end for that
+# player, not a cosmetic gap.
+st.markdown("#### 🏷️ Your team name")
+team_name = st.text_input(
+    "Your team name", key="team_name", label_visibility="collapsed",
+    placeholder="e.g. Team Rocket 🚀",
+    help="Shown on the leaderboard - pick something your team will recognise. Required before you "
+         "can lock in a portfolio.",
+)
 team_display = team_name.strip()
+if not team_display:
+    st.caption("👆 Required - pick a name so your score can go on the leaderboard.")
 
 st.markdown("#### 🏗️ Your allocation")
 st.caption("Set a weight for each asset class you want to hold - drag the slider (2% steps) or "
            "type an exact % in the box beside it. They must add up to 100%; leave one at 0% to "
-           "leave it out. Fees are fixed per asset class (a low-cost passive-fund assumption) - "
-           "hover the ⓘ next to any name for what it is, how risky it tends to be, and its fee.")
+           "leave it out. Fees are fixed per asset class (a low-cost passive-fund assumption, "
+           "shown next to each name) - you can't change them here.")
 
 if "game_fun_fact" not in st.session_state:
     st.session_state["game_fun_fact"] = random.choice(FUN_FACTS)
@@ -1223,14 +1308,22 @@ for label in labels:
 
     row_l, row_s, row_n = st.columns([3, 5, 1.7])
     with row_l:
+        # The fee is shown here as plain text, not hidden behind the ⓘ hover - feedback was that
+        # "can see the fee but can't change it" needs the fee itself to actually be visible, not
+        # just documented in a tooltip a player might never open. Editable per-bucket fees may
+        # come later; for now this is view-only, fixed by GAME_BUCKETS.
+        #
         # st.slider's own help="" tooltip icon gets display:none'd along with the label when
-        # label_visibility="collapsed", so the hint is rendered here instead as a plain HTML
-        # title attribute on a small info glyph next to the row's own label.
+        # label_visibility="collapsed", so the risk/description hint is rendered here instead as
+        # a plain HTML title attribute on a small info glyph next to the row's own label.
         _hint = _asset_help(label)
-        _hint_full = f"{_hint}  •  Assumed fee: {cfg['fee'] * 100:.2f}% pa" if _hint else None
-        _hint_html = (f" <span style='opacity:0.55; cursor:help;' title='{html.escape(_hint_full)}'>ⓘ</span>"
-                      if _hint_full else "")
-        st.markdown(f"<div style='padding-top:0.55rem;'>{label}{_hint_html}</div>", unsafe_allow_html=True)
+        _hint_html = (f" <span style='opacity:0.55; cursor:help;' title='{html.escape(_hint)}'>ⓘ</span>"
+                      if _hint else "")
+        st.markdown(
+            f"<div style='padding-top:0.55rem;'>{label}{_hint_html} "
+            f"<span style='opacity:0.55; font-size:0.82em;'>· {cfg['fee'] * 100:.2f}% pa fee</span></div>",
+            unsafe_allow_html=True,
+        )
     with row_s:
         st.slider(label, 0.0, 100.0, step=2.0, key=sld_key, on_change=_sync_from_slider,
                    label_visibility="collapsed")
@@ -1244,7 +1337,9 @@ edited = pd.DataFrame({"Asset class": labels, "Weight %": weight_values})
 total_weight = float(edited["Weight %"].sum())
 selected_count = int((edited["Weight %"] > 0).sum())
 weights_ok = abs(total_weight - 100.0) < 0.51
-count_ok = 0 < selected_count <= max_classes
+# No cap on how many asset classes a player can use any more (dropped per feedback) - just
+# needs at least one.
+count_ok = selected_count > 0
 name_ok = bool(team_name.strip())
 can_reveal = weights_ok and count_ok and name_ok
 
@@ -1281,19 +1376,16 @@ with progress_col:
     _stat_card("Total allocated", f"{total_weight:.1f}% / 100%",
                COLOR_GOOD if weights_ok else None, icon="🧮")
 with count_col:
-    _stat_card("Asset classes used", f"{selected_count} / {max_classes}",
-               COLOR_GOOD if count_ok else COLOR_BAD if selected_count else None, icon="🧩")
+    _stat_card("Asset classes used", f"{selected_count} of {len(GAME_BUCKETS)} available",
+               COLOR_GOOD if count_ok else None, icon="🧩")
 with name_col:
     _stat_card("Team name", html.escape(team_display) if name_ok else "Not set yet",
                COLOR_GOOD if name_ok else COLOR_BAD, icon="🏷️")
 
 if not weights_ok:
     st.warning("Your weights need to add up to 100% before you can build your portfolio.")
-if not count_ok and selected_count > 0:
-    st.warning(f"You've used {selected_count} asset classes - the limit for this game is {max_classes}. "
-               f"Zero out some rows to get under the limit.")
 if not name_ok:
-    st.warning("Enter a team / player name above so your score can go on the leaderboard.")
+    st.warning("Enter a team name above so your score can go on the leaderboard.")
 
 reveal = st.button("🔒 Lock in my portfolio", type="primary",
                     disabled=not can_reveal, use_container_width=True,
@@ -1323,23 +1415,40 @@ if reveal:
                              state_pension_annual=float(sp_amount), state_pension_age=int(sp_age))
     result = run_simulation("Your portfolio", asset_df, cpi, profile, method="stationary_block",
                              n_sims=2000, seed=42, custom_weights=sim_weights, custom_fee=custom_fee)
+
+    # "Median annual return" used to be derived from the WITH-withdrawal paths above, which
+    # bakes the retirement drawdown into what read as a fund-performance number - not actually
+    # what it said it was. This re-runs the exact same mix/fee through the exact same simulation
+    # methodology but with a zero-spend profile, so the median CAGR below is genuinely "how did
+    # the fund itself perform", isolated from spending - same spirit as downside_stats() further
+    # down, which the main app's summary PDF already computes excluding withdrawals.
+    growth_profile = ClientProfile(starting_age=age, horizon_years=horizon, starting_pot=float(pot),
+                                    initial_annual_spend=0.0)
+    growth_result = run_simulation("Your portfolio", asset_df, cpi, growth_profile, method="stationary_block",
+                                    n_sims=2000, seed=42, custom_weights=sim_weights, custom_fee=custom_fee)
     suspense_slot.empty()
 
-    median_return = _median_cagr(result.paths, float(pot), horizon)
+    fund_growth = _median_cagr(growth_result.paths, float(pot), horizon)
+    # Max/average drawdown + CVaR, computed straight from the historical monthly return series for
+    # this exact mix/fee (deterministic, not simulated) - the same downside_stats() the main app's
+    # client summary PDF uses, so the numbers mean the same thing in both places.
+    dd_stats = downside_stats("Your portfolio", asset_df, custom_weights=sim_weights, custom_fee=custom_fee)
+
     st.session_state[result_key] = result.prob_ruin
-    st.session_state[f"game_return_{granularity}"] = median_return
+    st.session_state[f"game_growth_{granularity}"] = fund_growth
+    st.session_state[f"game_dd_{granularity}"] = dd_stats
     st.session_state[f"game_fee_{granularity}"] = custom_fee
     st.session_state[f"game_paths_{granularity}"] = result.paths
     # Store the EXPANDED series weights - the crash re-test below feeds this straight back into
     # run_simulation, which wants asset-class-series keys, not bucket names.
     st.session_state[f"game_weights_{granularity}"] = sim_weights
-    st.session_state[f"game_badges_{granularity}"] = _badges(bucket_weights, custom_fee, selected_count, max_classes)
+    st.session_state[f"game_badges_{granularity}"] = _badges(bucket_weights, custom_fee, selected_count)
     _append_leaderboard({
         "Time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "Team": team_display,
         "Mode": granularity,
         "Probability of ruin": round(result.prob_ruin * 100, 2),
-        "Median annual return %": round(median_return * 100, 2),
+        "Fund growth %": round(fund_growth * 100, 2),
         "Asset classes used": selected_count,
         "Allocation": allocation_str,
     })
@@ -1436,8 +1545,8 @@ else:
         f"<div class='champion-stats'>"
         f"<div><div class='champion-stat-value'>{winner['Probability of ruin']:.1f}%</div>"
         f"<div class='champion-stat-label'>Probability of ruin</div></div>"
-        f"<div><div class='champion-stat-value'>{winner['Median annual return %']:.1f}%</div>"
-        f"<div class='champion-stat-label'>Median annual return</div></div>"
+        f"<div><div class='champion-stat-value'>{winner['Fund growth %']:.1f}%</div>"
+        f"<div class='champion-stat-label'>Fund growth (no withdrawals)</div></div>"
         f"<div><div class='champion-stat-value'>{int(winner['Asset classes used'])}</div>"
         f"<div class='champion-stat-label'>Asset classes used</div></div>"
         f"</div></div>",
@@ -1578,13 +1687,13 @@ if has_result and revealed:
                 st.plotly_chart(_crash_fig, use_container_width=True,
                                  key=f"crash_chart_{granularity}_{_label}")
 
-    median_return = st.session_state.get(f"game_return_{granularity}", 0.0)
+    fund_growth = st.session_state.get(f"game_growth_{granularity}", 0.0)
     median_outcome = float(np.median(st.session_state[f"game_paths_{granularity}"][:, -1]))
     return_col1, return_col2 = st.columns(2)
     with return_col1:
-        _stat_card("Median annual return", f"{median_return * 100:+.1f}%",
-                   COLOR_GOOD if median_return >= 0 else COLOR_BAD, icon="📈",
-                   comment=_return_comment(median_return))
+        _stat_card("Fund growth (no withdrawals)", f"{fund_growth * 100:+.1f}%",
+                   COLOR_GOOD if fund_growth >= 0 else COLOR_BAD, icon="📈",
+                   comment=_growth_comment(fund_growth))
     with return_col2:
         _stat_card("Legacy left behind", f"£{median_outcome:,.0f}", icon="🏺",
                    comment=_outcome_comment(median_outcome, float(pot)))
@@ -1605,6 +1714,30 @@ if has_result and revealed:
             f"£{_inflation_bite:,.0f} of it over {horizon} years.</div>",
             unsafe_allow_html=True,
         )
+
+    # Same "downside risk" section as the main app's client summary PDF - Max/Average Drawdown
+    # and CVaR (worst-5%-tail average), computed straight from this exact mix/fee's historical
+    # monthly return series rather than the simulation, so - like the PDF - these are excluding
+    # the impact of investor withdrawals: they show how bumpy the STRATEGY itself is, not how
+    # cash-flow-driven withdrawals moved the pot's value.
+    dd_stats = st.session_state.get(f"game_dd_{granularity}")
+    if dd_stats:
+        st.markdown("#### 📉 Downside risk")
+        st.caption("How bumpy this exact mix has actually been historically - excluding "
+                   "withdrawals, so this is the strategy's own ride, not the retirement drawdown.")
+        dd_col1, dd_col2, dd_col3, dd_col4 = st.columns(4)
+        with dd_col1:
+            _stat_card("Max drawdown", f"{dd_stats['maxdd'] * 100:.1f}%", COLOR_BAD, icon="📉",
+                       comment="Worst peak-to-trough fall")
+        with dd_col2:
+            _stat_card("Average drawdown", f"{dd_stats['avgdd'] * 100:.1f}%", COLOR_WARN, icon="〰️",
+                       comment="Typical dip, not just the worst one")
+        with dd_col3:
+            _stat_card("CVaR 95 (monthly)", f"{dd_stats['cvar_m'] * 100:.1f}%", COLOR_WARN, icon="🎯",
+                       comment="Avg of the worst 5% of months")
+        with dd_col4:
+            _stat_card("CVaR 95 (annual)", f"{dd_stats['cvar_a'] * 100:.1f}%", COLOR_WARN, icon="🎯",
+                       comment="Avg of the worst 5% of rolling years")
 
     badges = st.session_state.get(f"game_badges_{granularity}", [])
     if badges:

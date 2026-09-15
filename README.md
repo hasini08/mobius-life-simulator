@@ -93,14 +93,20 @@ Two pages, one Streamlit app, both reading the same `data/` and `src/`:
   holdings/weights/fees are **data-driven** (`data/portfolio_holdings.csv` etc.), editable
   live in the app's sidebar — adding a brand new competitor portfolio needs no code changes.
 - **`app/pages/1_Portfolio_Builder_Game.py`** — a gamified internal version. Players assign
-  weights across a short menu of ~7 consolidated asset classes (each a fixed blend of the same
-  underlying series the main app uses; fees are fixed per class, not player-set), hit reveal, and
-  see only their probability of ruin — plus a shared cross-device leaderboard, badges, historical
-  crash-test buttons, and an interactive fan chart of their own pot's simulated range. Built for
-  a live company-wide activity, not client use. (Earlier versions exposed all ~26 underlying
-  series with per-row fee inputs, offered a broader "fund store categories" mode, and benchmarked
-  players against Mobius Better; all were dropped after event feedback in favour of the one
-  simpler mode.)
+  weights across a curated 16-class menu (`GAME_BUCKETS`, e.g. Global Equities, Berenberg /
+  Protected Equities, UK Gilts 15yr+, Hedge Fund Trend — see the module docstring in that file
+  for the full list, renames and rationale), in any combination (no cap on how many), each a
+  fixed blend of the same underlying series the main app uses with a fixed, visible-but-not-editable
+  fee per class. Hit reveal and see the headline probability of ruin plus fund growth (the same
+  mix/fee simulated with no withdrawals) and downside-risk stats (Max/Average Drawdown, CVaR — the
+  same `downside_stats()` the main app's client summary PDF uses) — plus a shared cross-device
+  leaderboard, badges, historical crash-test buttons, and an interactive fan chart of their own
+  pot's simulated range. Built for a live company-wide activity, not client use. (The asset-class
+  menu has moved back and forth between this curated per-holding list and a more heavily
+  consolidated ~7-bucket version across iterations, and earlier versions also had player-set
+  per-row fees, capped how many asset classes a player could use, offered a broader "fund store
+  categories" mode, and benchmarked players against Mobius Better; all dropped after event
+  feedback.)
 
 ## How it fits together
 
@@ -337,11 +343,11 @@ by this repo's `.gitignore`, since that file would contain a real private key.
 [HOST_GUIDE.md](HOST_GUIDE.md) instead — this section explains how the feature works.*
 
 When 20-30 groups play at once, they should all be playing the **same scenario** (same age,
-horizon, pot, spend, and constraints) rather than each picking their own. The "⚙️ Game setup
+horizon, pot, spend) rather than each picking their own. The "⚙️ Game setup
 (host controls)" expander at the top of the game page handles this:
 
 - **By default, everyone sees a read-only summary** of the current scenario (age, horizon, pot,
-  spend, max asset classes) plus a caption showing who last published it and when. They
+  spend) plus a caption showing who last published it and when. They
   cannot edit it.
 - **The session host enters a PIN** in the same expander to unlock editable controls, sets the
   scenario, and clicks **"📡 Publish to all groups"**. Every other open tab/device picks up the

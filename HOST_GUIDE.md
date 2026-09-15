@@ -43,9 +43,8 @@ you can find on the day.)*
 
 ## Running a round
 
-1. **Set the scenario** (in host mode): starting age, pot, spend, time horizon, and the cap on
-   how many asset classes a player may use. Defaults are reasonable if you don't want to
-   customise. Click **"📡 Publish to all groups"**.
+1. **Set the scenario** (in host mode): starting age, pot, spend, time horizon. Defaults are
+   reasonable if you don't want to customise. Click **"📡 Publish to all groups"**.
    Nobody sees the actual portfolio builder until you've done this — before that, everyone's
    looking at a "how to play" screen with a **"🔄 Check again"** button. Tell them to hit that
    once you've published; it unlocks their builder right there (with a little balloons moment).
