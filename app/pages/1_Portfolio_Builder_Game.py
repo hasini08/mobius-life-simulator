@@ -512,8 +512,9 @@ components.html(
 GAME_STATE_DIR = Path(__file__).resolve().parent.parent.parent / "game_state"
 GAME_STATE_DIR.mkdir(exist_ok=True)
 LEADERBOARD_CSV = GAME_STATE_DIR / "leaderboard.csv"
-LEADERBOARD_COLUMNS = ["Time", "Team", "Mode", "Score", "Probability of ruin", "Max drawdown %",
-                        "Drawdown duration (months)", "Fund growth %", "Asset classes used", "Allocation"]
+LEADERBOARD_COLUMNS = ["Time", "Team", "Mode", "Score", "Probability of ruin", "Median pot size (£)",
+                        "Max drawdown %", "Drawdown duration (months)", "Fund growth %",
+                        "Asset classes used", "Allocation"]
 
 # The leaderboard's actual ranking formula (lower = safer = ranks higher):
 #   Score = Probability of ruin  +  0.2 x Max Drawdown  +  0.05 x Drawdown Duration
@@ -1504,9 +1505,17 @@ if reveal:
     # convention. Lower is still better/safer, same direction probability of ruin alone used to
     # rank before.
     score = _game_score(result.prob_ruin, dd_stats, horizon)
+    # Median pot size (per Balf/Joshun's WhatsApp thread - "add a median pot size alongside prob
+    # of ruin"): the median SIMULATED final pot value (nominal £, WITH withdrawals - this is "how
+    # much is actually left", not the no-withdrawal fund_growth figure above). Deliberately NOT
+    # folded into the Score/ranking formula itself - that's a separate, bigger decision nobody's
+    # confirmed - it's shown alongside probability of ruin as its own comparable leaderboard
+    # column instead, matching how it was asked for.
+    median_pot_size = float(np.median(result.paths[:, -1]))
 
     st.session_state[result_key] = result.prob_ruin
     st.session_state[f"game_score_{granularity}"] = score
+    st.session_state[f"game_median_pot_{granularity}"] = median_pot_size
     st.session_state[f"game_growth_{granularity}"] = fund_growth
     st.session_state[f"game_dd_{granularity}"] = dd_stats
     st.session_state[f"game_vol_{granularity}"] = volatility
@@ -1523,6 +1532,7 @@ if reveal:
         "Mode": granularity,
         "Score": round(score, 2),
         "Probability of ruin": round(result.prob_ruin * 100, 2),
+        "Median pot size (£)": round(median_pot_size, 0),
         "Max drawdown %": round(abs(dd_stats["maxdd"]) * 100, 2),
         "Drawdown duration (months)": dd_stats["maxdd_duration_months"],
         "Fund growth %": round(fund_growth * 100, 2),
@@ -1624,6 +1634,8 @@ else:
         f"<div class='champion-stat-label'>Score (lower wins)</div></div>"
         f"<div><div class='champion-stat-value'>{winner['Probability of ruin']:.1f}%</div>"
         f"<div class='champion-stat-label'>Probability of ruin</div></div>"
+        f"<div><div class='champion-stat-value'>£{winner['Median pot size (£)']:,.0f}</div>"
+        f"<div class='champion-stat-label'>Median pot size</div></div>"
         f"<div><div class='champion-stat-value'>{winner['Max drawdown %']:.1f}%</div>"
         f"<div class='champion-stat-label'>Max drawdown</div></div>"
         f"<div><div class='champion-stat-value'>{int(winner['Asset classes used'])}</div>"
@@ -1723,19 +1735,24 @@ if has_result and revealed:
     _final_dd = st.session_state.get(f"game_dd_{granularity}")
     _final_fee = st.session_state.get(f"game_fee_{granularity}", 0.0)
     _final_cost = st.session_state.get(f"game_cost_{granularity}", 0.0)
+    _final_median_pot = st.session_state.get(f"game_median_pot_{granularity}", 0.0)
     st.markdown("#### 🏁 Final scorecard")
     st.caption("Score is what the leaderboard actually ranks on - probability of ruin + "
                f"{SCORE_WEIGHTS['maxdd']:.2f} x max drawdown + {SCORE_WEIGHTS['maxdd_duration']:.2f} x "
-               "drawdown duration (as a % of your time horizon). Lower is safer.")
-    sc1, sc2, sc3, sc4 = st.columns(4)
+               "drawdown duration (as a % of your time horizon). Lower is safer. Median pot size "
+               "sits alongside it for context, but isn't part of the ranking formula itself.")
+    sc1, sc2, sc3, sc4, sc5 = st.columns(5)
     with sc1:
         _stat_card("Score", f"{score:.1f}", color, icon="🏁", comment="Lower = safer")
     with sc2:
         _stat_card("Probability of ruin", f"{prob_ruin * 100:.1f}%", color, icon="💀")
     with sc3:
+        _stat_card("Median pot size", f"£{_final_median_pot:,.0f}", icon="🏺",
+                   comment="Simulated median final value, with withdrawals")
+    with sc4:
         _stat_card("Max drawdown", f"{_final_dd['maxdd'] * 100:.1f}%" if _final_dd else "—",
                    COLOR_BAD, icon="📉", comment="Worst peak-to-trough fall, excluding withdrawals")
-    with sc4:
+    with sc5:
         _stat_card("Annual manager cost", f"£{_final_cost:,.0f}/yr", icon="💷",
                    comment=f"{_final_fee * 100:.2f}% weighted fee on £{float(pot):,.0f}")
 
