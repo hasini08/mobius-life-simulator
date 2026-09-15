@@ -46,7 +46,7 @@ def game_buckets(game_tree):
 
 def test_there_is_a_curated_handful_of_buckets(game_buckets):
     """A sanity bound, not a design target - the list has moved between a heavily consolidated
-    ~7-bucket menu and a more granular curated one (currently 16, one per named holding) across
+    ~7-bucket menu and a more granular curated one (currently 17, one per named holding) across
     iterations; this just catches it silently creeping all the way back up to the main app's full
     ~26-series list (portfolios.AC), which would defeat the point of curating a menu at all."""
     assert 3 <= len(game_buckets) <= 20, f"expected a curated bucket menu, got {len(game_buckets)}"

@@ -724,7 +724,7 @@ def _tier(prob_ruin):
         return "High risk", "💀", COLOR_BAD, "Back to the drawing board - this pot runs out a lot."
 
 
-# The game's asset-class menu - a curated 16-class list handed over asset-by-asset (see the
+# The game's asset-class menu - a curated 17-class list handed over asset-by-asset (see the
 # "asset classes" thread), a deliberate step back from an earlier, more heavily consolidated
 # 7-bucket version: fewer generic blended buckets, more of the ACTUAL named holdings the main app
 # already tracks. Each bucket is still a FIXED blend of one or more portfolios.AC series (the
@@ -741,10 +741,6 @@ def _tier(prob_ruin):
 #     where this series entered the main data set. It's a DIFFERENT series from "Eq Gbl DM Min vol
 #     Gross" below (a similarly-named but distinct min-vol factor series) - the two are easy to
 #     confuse but are genuinely different data.
-#
-# There is deliberately no "Cash" option on this list (unlike the previous 7-bucket version) - a
-# real design choice carried over from that thread, not an oversight: every player takes on some
-# market/credit risk.
 #
 # `fee` is the assumed all-in annual fund fee for that bucket - players don't set fees themselves
 # (view-only, shown next to each name); these are illustrative fee-by-asset-type assumptions, not
@@ -866,6 +862,13 @@ GAME_BUCKETS: dict = {
         "risk": "🟡 Medium risk",
         "blurb": "A 'trend following' hedge fund strategy - aims to profit from sustained price "
                  "trends in either direction.",
+    },
+    "Cash": {
+        "series": {"Cash": 1.0},
+        "fee": 0.0005,
+        "risk": "🟢 Lower risk",
+        "blurb": "Bank deposits and equivalents - the steadiest holding, but returns rarely beat "
+                 "inflation over long periods.",
     },
 }
 
