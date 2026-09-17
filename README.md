@@ -93,9 +93,9 @@ Two pages, one Streamlit app, both reading the same `data/` and `src/`:
   holdings/weights/fees are **data-driven** (`data/portfolio_holdings.csv` etc.), editable
   live in the app's sidebar — adding a brand new competitor portfolio needs no code changes.
 - **`app/pages/1_Portfolio_Builder_Game.py`** — a gamified internal version. Players assign
-  weights across a curated 17-class menu (`GAME_BUCKETS`, e.g. Global Equities, Berenberg /
-  Protected Equities, UK Gilts 15yr+, Hedge Fund Trend — see the module docstring in that file
-  for the full list, renames and rationale), in any combination (no cap on how many), each a
+  weights across a curated 17-class menu (`GAME_BUCKETS`, e.g. Global Equities, Protected
+  Equities, UK Gilts 15yr+, Hedge Fund Trend — see the module docstring in that file for the
+  full list, renames and rationale), in any combination (no cap on how many), each a
   fixed blend of the same underlying series the main app uses with a fixed, visible-but-not-editable
   fee per class. Hit reveal and see the headline probability of ruin plus fund growth (the same
   mix/fee simulated with no withdrawals) and downside-risk stats (Max/Average Drawdown, drawdown

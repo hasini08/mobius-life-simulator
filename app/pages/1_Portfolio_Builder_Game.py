@@ -778,15 +778,19 @@ def _tier(score_fraction):
 # Two renames from the underlying AC label to a clearer display name, per that same thread:
 #   - "Global Agg Bonds" (the AC series - NOT the differently-sourced AC series literally called
 #     "Global Bonds", which this list doesn't use at all) is shown to players as "Global Bonds".
-#   - "Eq Gbl DM Novum Mgd Vol" is shown as "Berenberg / Protected Equities" - confirmed (not a
-#     proxy) as the same real holding by src/migrate_better_v4_into_main_data.py, which is also
-#     where this series entered the main data set. It's a DIFFERENT series from "Eq Gbl DM Min vol
-#     Gross" below (a similarly-named but distinct min-vol factor series) - the two are easy to
-#     confuse but are genuinely different data.
+#   - "Eq Gbl DM Novum Mgd Vol" is shown as "Protected Equities" (originally "Berenberg /
+#     Protected Equities" - Berenberg's name was dropped from the player-facing label and blurb
+#     per feedback, kept here in comments only) - confirmed (not a proxy) as the same real holding
+#     by src/migrate_better_v4_into_main_data.py, which is also where this series entered the main
+#     data set. It's a DIFFERENT series from "Eq Gbl DM Min vol Gross" below (a similarly-named
+#     but distinct min-vol factor series) - the two are easy to confuse but are genuinely
+#     different data.
 #
-# `fee` is the assumed all-in annual fund fee for that bucket - players don't set fees themselves
-# (view-only, shown next to each name); these are illustrative fee-by-asset-type assumptions, not
-# sourced from a real fee schedule - swap in real numbers whenever they're available. (Mobius's
+# `fee` is the assumed all-in annual fund fee for that bucket - hidden from players entirely
+# (a per-row fee display was tried and then reverted per feedback), fixed here and applied
+# silently, weighted by whatever allocation the player builds. These are illustrative
+# fee-by-asset-type assumptions, not sourced from a real fee schedule - swap in real numbers
+# whenever they're available. (Mobius's
 # own real "Better" portfolio actually runs on one FLAT 7bps fee across every holding, per
 # src/migrate_better_v4_into_main_data.py's FLAT_MOBIUS_FEE - deliberately NOT reused here, since
 # the game's whole "fees compound too" point depends on fees actually varying by asset class.)
@@ -823,12 +827,12 @@ GAME_BUCKETS: dict = {
         "blurb": "Developed-market shares specifically selected to minimise volatility - still "
                  "equity risk, just a smoother ride than the broad market.",
     },
-    "Berenberg / Protected Equities": {
+    "Protected Equities": {
         "series": {"Eq Gbl DM Novum Mgd Vol": 1.0},
         "fee": 0.0045,
         "risk": "🟡 Medium risk",
-        "blurb": "Mobius's real Berenberg / Protected Equities holding - developed-market shares "
-                 "actively managed to reduce volatility and cushion the downside.",
+        "blurb": "Mobius's real Protected Equities holding - developed-market shares actively "
+                 "managed to reduce volatility and cushion the downside.",
     },
     "UK Index-Linked Gilts": {
         "series": {"UK Index-Linked Gilts": 1.0},
@@ -942,7 +946,7 @@ for _b, _cfg in GAME_BUCKETS.items():
 # Badge groupings, in the same bucket-label terms _badges() receives its `weights` in.
 _GAME_EQUITY_BUCKETS = {
     "Global Equities", "EM Equities", "Developed Market Quality Equities",
-    "Developed Markets Minimum Vol Equities", "Berenberg / Protected Equities",
+    "Developed Markets Minimum Vol Equities", "Protected Equities",
 }
 _GAME_OVERSEAS_BUCKETS = {"EM Equities"}
 _GAME_ALT_BUCKETS = {"REITs", "Infrastructure", "Commodities", "Hedge Fund Credit Suisse", "Hedge Fund Trend"}
@@ -1117,8 +1121,8 @@ else:
         "<div class='stats-banner'>"
         f"<span>🎲 {_n_plays} portfolio{'s' if _n_plays != 1 else ''} built</span>"
         f"<span>{_n_teams} team{'s' if _n_teams != 1 else ''} playing</span>"
-        f"<span>📊 avg probability of ruin: {_avg_ruin:.1f}%</span>"
-        f"<span>🏆 best so far: {_best_row['Team']} (score {_best_row['Score']:.1f})</span>"
+        f"<span>📊 avg probability of ruin: {_avg_ruin:.2f}%</span>"
+        f"<span>🏆 best so far: {_best_row['Team']} (score {_best_row['Score']:.2f})</span>"
         "</div>",
         unsafe_allow_html=True,
     )
@@ -1317,8 +1321,7 @@ if not team_display:
 st.markdown("#### 🏗️ Your allocation")
 st.caption("Set a weight for each asset class you want to hold - drag the slider (5% steps) or "
            "type an exact % in the box beside it. They must add up to 100%; leave one at 0% to "
-           "leave it out. Fees are fixed per asset class (a low-cost passive-fund assumption, "
-           "shown next to each name) - you can't change them here.")
+           "leave it out.")
 
 if "game_fun_fact" not in st.session_state:
     st.session_state["game_fun_fact"] = random.choice(FUN_FACTS)
@@ -1339,7 +1342,6 @@ with _hdr_s:
 with _hdr_n:
     st.caption("TYPE %")
 for label in labels:
-    cfg = GAME_BUCKETS[label]
     sld_key = f"ws_{granularity}_{label}"
     num_key = f"wn_{granularity}_{label}"
     st.session_state.setdefault(sld_key, 0.0)
@@ -1353,10 +1355,9 @@ for label in labels:
 
     row_l, row_s, row_n = st.columns([3, 5, 1.7])
     with row_l:
-        # The fee is shown here as plain text, not hidden behind the ⓘ hover - feedback was that
-        # "can see the fee but can't change it" needs the fee itself to actually be visible, not
-        # just documented in a tooltip a player might never open. Editable per-bucket fees may
-        # come later; for now this is view-only, fixed by GAME_BUCKETS.
+        # Fees are hidden from players entirely (feedback: "hide fees, don't worry about
+        # changing them" - they stay fixed by GAME_BUCKETS, just aren't surfaced in the builder
+        # any more). Was briefly shown as plain text here; reverted.
         #
         # st.slider's own help="" tooltip icon gets display:none'd along with the label when
         # label_visibility="collapsed", so the risk/description hint is rendered here instead as
@@ -1364,11 +1365,7 @@ for label in labels:
         _hint = _asset_help(label)
         _hint_html = (f" <span style='opacity:0.55; cursor:help;' title='{html.escape(_hint)}'>ⓘ</span>"
                       if _hint else "")
-        st.markdown(
-            f"<div style='padding-top:0.55rem;'>{label}{_hint_html} "
-            f"<span style='opacity:0.55; font-size:0.82em;'>· {cfg['fee'] * 100:.2f}% pa fee</span></div>",
-            unsafe_allow_html=True,
-        )
+        st.markdown(f"<div style='padding-top:0.55rem;'>{label}{_hint_html}</div>", unsafe_allow_html=True)
     with row_s:
         st.slider(label, 0.0, 100.0, step=5.0, key=sld_key, on_change=_sync_from_slider,
                    label_visibility="collapsed")
@@ -1416,27 +1413,13 @@ if _risk_read is not None:
     st.caption("A quick read on your mix as you build - not the real simulation, which only runs "
                "once you lock in your portfolio.")
 
-# Live, running fee cost as you build - weighted-average fee across whatever's allocated SO FAR
-# (needn't sum to 100 yet), converted to an indicative £/yr figure against the published pot size.
-# Purely a build-time steer (like the risk dial above); the authoritative figure is the "Annual
-# manager cost" stat in the results, computed from the actual locked-in 100% allocation.
-if total_weight > 0:
-    live_fee_pct = float(sum(w * GAME_BUCKETS[lbl]["fee"] for lbl, w in zip(labels, weight_values) if w > 0)
-                          / total_weight)
-else:
-    live_fee_pct = 0.0
-live_cost_per_year = live_fee_pct * float(pot)
-
-progress_col, count_col, cost_col, name_col = st.columns(4)
+progress_col, count_col, name_col = st.columns(3)
 with progress_col:
     _stat_card("Total allocated", f"{total_weight:.1f}% / 100%",
                COLOR_GOOD if weights_ok else None, icon="🧮")
 with count_col:
     _stat_card("Asset classes used", f"{selected_count} of {len(GAME_BUCKETS)} available",
                COLOR_GOOD if count_ok else None, icon="🧩")
-with cost_col:
-    _stat_card("Fee cost so far", f"£{live_cost_per_year:,.0f}/yr" if total_weight > 0 else "—",
-               icon="💷", comment=f"{live_fee_pct * 100:.2f}% weighted fee" if total_weight > 0 else None)
 with name_col:
     _stat_card("Team name", html.escape(team_display) if name_ok else "Not set yet",
                COLOR_GOOD if name_ok else COLOR_BAD, icon="🏷️")
@@ -1629,13 +1612,13 @@ else:
         f"letter-spacing:0.08em; opacity:0.9;'>Champion portfolio</div>"
         f"<div class='champion-name'>{html.escape(str(winner['Team']))}</div>"
         f"<div class='champion-stats'>"
-        f"<div><div class='champion-stat-value'>{winner['Score']:.1f}</div>"
+        f"<div><div class='champion-stat-value'>{winner['Score']:.2f}</div>"
         f"<div class='champion-stat-label'>Score (lower wins)</div></div>"
-        f"<div><div class='champion-stat-value'>{winner['Probability of ruin']:.1f}%</div>"
+        f"<div><div class='champion-stat-value'>{winner['Probability of ruin']:.2f}%</div>"
         f"<div class='champion-stat-label'>Probability of ruin</div></div>"
         f"<div><div class='champion-stat-value'>£{winner['Median pot size (£)']:,.0f}</div>"
         f"<div class='champion-stat-label'>Median pot size</div></div>"
-        f"<div><div class='champion-stat-value'>{winner['Max drawdown %']:.1f}%</div>"
+        f"<div><div class='champion-stat-value'>{winner['Max drawdown %']:.2f}%</div>"
         f"<div class='champion-stat-label'>Max drawdown</div></div>"
         f"<div><div class='champion-stat-value'>{int(winner['Asset classes used'])}</div>"
         f"<div class='champion-stat-label'>Asset classes used</div></div>"
@@ -1673,10 +1656,48 @@ else:
             st.markdown(
                 f"<div class='fun-fact-banner' style='background:{PALE_PINK}; text-align:center; "
                 f"font-weight:600;'>🔥 Nail-biter! {html.escape(str(winner['Team']))} edged out "
-                f"{html.escape(str(_rival['Team']))} by just {_gap:.1f} points of "
+                f"{html.escape(str(_rival['Team']))} by just {_gap:.2f} points of "
                 "score.</div>",
                 unsafe_allow_html=True,
             )
+
+    if is_host:
+        # Host-only, per feedback: "when the results come in, the ability for the host to click
+        # on different teams' results and see their allocations" - the same bar-chart treatment
+        # the champion already gets above, just picker-driven so it works for any row, not only
+        # #1. Options are keyed by ranked's own positional index (not the Team name) so two
+        # entries from the same team playing twice - or two teams with the same name - don't
+        # collide in the dropdown or silently resolve to the wrong row.
+        st.markdown("#### 🔍 Inspect a team's allocation")
+        _inspect_idx = st.selectbox(
+            "Team to inspect", options=list(ranked.index), key="host_inspect_team",
+            format_func=lambda i: f"{ranked.loc[i, 'Rank']} · {ranked.loc[i, 'Team']} "
+                                   f"(score {ranked.loc[i, 'Score']:.2f})",
+        )
+        _inspect_row = ranked.loc[_inspect_idx]
+        _inspect_alloc = _inspect_row.get("Allocation")
+        _inspect_pairs = (re.findall(r"([^,]+?)\s+(\d+(?:\.\d+)?)%", _inspect_alloc)
+                          if isinstance(_inspect_alloc, str) and _inspect_alloc.strip() else [])
+        if _inspect_pairs:
+            _ip_sorted = sorted(_inspect_pairs, key=lambda p: -float(p[1]))
+            _ip_labels = [p[0].strip() for p in _ip_sorted]
+            _ip_values = [float(p[1]) for p in _ip_sorted]
+            _inspect_fig = go.Figure(go.Bar(
+                x=_ip_values, y=_ip_labels, orientation="h", marker_color=COLOR_GOOD,
+                text=[f"{v:.0f}%" for v in _ip_values], textposition="outside",
+            ))
+            _inspect_fig.update_layout(
+                height=max(220, 60 + 34 * len(_ip_labels)),
+                margin=dict(l=10, r=30, t=10, b=10),
+                xaxis_title="Weight (%)", xaxis_range=[0, max(_ip_values) * 1.2],
+                yaxis=dict(autorange="reversed"),
+            )
+            st.plotly_chart(_inspect_fig, use_container_width=True, key="host_inspect_chart")
+            st.caption(f"Score {_inspect_row['Score']:.2f} · Probability of ruin "
+                       f"{float(_inspect_row['Probability of ruin']):.2f}% · Max drawdown "
+                       f"{float(_inspect_row['Max drawdown %']):.2f}%")
+        else:
+            st.caption("No allocation recorded for this team (played before this feature was added).")
 
     # Podium tints derived from the brand palette rather than generic gold/silver/bronze web
     # colours: deepened Pale Yellow for 1st, Steel Grey for 2nd (already named "Steel" - a neat
@@ -1687,7 +1708,9 @@ else:
         style = f"background-color: {_row_colors[row.name]}" if row.name in _row_colors else ""
         return [style] * len(row)
 
-    display_df = ranked.drop(columns=["Allocation"], errors="ignore")
+    # Drawdown duration isn't shown here either, matching the results detail page - it's a real
+    # ingredient of Score, just not surfaced as its own column (feedback: doesn't read well).
+    display_df = ranked.drop(columns=["Allocation", "Drawdown duration (months)"], errors="ignore")
     st.dataframe(display_df.style.apply(_highlight_podium, axis=1), hide_index=True, use_container_width=True)
 
 # Everyone's shared moment (champion + leaderboard) has now landed above - each player's own
@@ -1716,7 +1739,7 @@ if has_result and revealed:
         f"<div class='result-card' style='background:linear-gradient(135deg, {color}, {color}cc);'>"
         f"<div style='font-size:0.9rem; font-weight:700; text-transform:uppercase; "
         f"letter-spacing:0.06em; opacity:0.9;'>{emoji} {tier}</div>"
-        f"<div class='big-number'>{prob_ruin * 100:.1f}%</div>"
+        f"<div class='big-number'>{prob_ruin * 100:.2f}%</div>"
         f"<div style='font-size:0.85rem; opacity:0.85;'>probability of ruin</div>"
         f"<div class='tagline'>{tagline}</div>"
         f"</div>",
@@ -1740,14 +1763,14 @@ if has_result and revealed:
                "sits alongside it for context, but isn't part of the ranking formula itself.")
     sc1, sc2, sc3, sc4, sc5 = st.columns(5)
     with sc1:
-        _stat_card("Score", f"{score:.1f}", color, icon="🏁", comment="Lower = safer")
+        _stat_card("Score", f"{score:.2f}", color, icon="🏁", comment="Lower = safer")
     with sc2:
-        _stat_card("Probability of ruin", f"{prob_ruin * 100:.1f}%", color, icon="💀")
+        _stat_card("Probability of ruin", f"{prob_ruin * 100:.2f}%", color, icon="💀")
     with sc3:
         _stat_card("Median pot size", f"£{_final_median_pot:,.0f}", icon="🏺",
                    comment="Simulated median final value, with withdrawals")
     with sc4:
-        _stat_card("Max drawdown", f"{_final_dd['maxdd'] * 100:.1f}%" if _final_dd else "—",
+        _stat_card("Max drawdown", f"{_final_dd['maxdd'] * 100:.2f}%" if _final_dd else "—",
                    COLOR_BAD, icon="📉", comment="Worst peak-to-trough fall, excluding withdrawals")
     with sc5:
         _stat_card("Annual manager cost", f"£{_final_cost:,.0f}/yr", icon="💷",
@@ -1784,7 +1807,7 @@ if has_result and revealed:
             _verdict_color = COLOR_GOOD if _survived else COLOR_BAD
             st.markdown(
                 f"<div class='crash-banner' style='background:{_verdict_color};'>"
-                f"{_label}: <b>{_verdict}</b> — {_crash_ruin * 100:.1f}% probability of ruin"
+                f"{_label}: <b>{_verdict}</b> — {_crash_ruin * 100:.2f}% probability of ruin"
                 "</div>",
                 unsafe_allow_html=True,
             )
@@ -1818,11 +1841,11 @@ if has_result and revealed:
     median_outcome = float(np.median(st.session_state[f"game_paths_{granularity}"][:, -1]))
     return_col1, return_col2, return_col3 = st.columns(3)
     with return_col1:
-        _stat_card("Fund growth (no withdrawals)", f"{fund_growth * 100:+.1f}%",
+        _stat_card("Fund growth (no withdrawals)", f"{fund_growth * 100:+.2f}%",
                    COLOR_GOOD if fund_growth >= 0 else COLOR_BAD, icon="📈",
                    comment=_growth_comment(fund_growth))
     with return_col2:
-        _stat_card("Volatility (annualised)", f"{volatility * 100:.1f}%", COLOR_WARN, icon="🎢",
+        _stat_card("Volatility (annualised)", f"{volatility * 100:.2f}%", COLOR_WARN, icon="🎢",
                    comment="How much this mix's returns have bounced around, historically")
     with return_col3:
         _stat_card("Legacy left behind", f"£{median_outcome:,.0f}", icon="🏺",
@@ -1855,21 +1878,21 @@ if has_result and revealed:
         st.markdown("#### 📉 Downside risk")
         st.caption("How bumpy this exact mix has actually been historically - excluding "
                    "withdrawals, so this is the strategy's own ride, not the retirement drawdown.")
-        dd_col1, dd_col2, dd_col3, dd_col4, dd_col5 = st.columns(5)
+        # Drawdown duration deliberately isn't shown as its own card here (feedback: it "doesn't
+        # quite look right" as a standalone stat) - it still feeds the Score formula above
+        # (SCORE_WEIGHTS/_game_score()), just isn't surfaced as a raw number in the UI.
+        dd_col1, dd_col2, dd_col3, dd_col4 = st.columns(4)
         with dd_col1:
-            _stat_card("Max drawdown", f"{dd_stats['maxdd'] * 100:.1f}%", COLOR_BAD, icon="📉",
+            _stat_card("Max drawdown", f"{dd_stats['maxdd'] * 100:.2f}%", COLOR_BAD, icon="📉",
                        comment="Worst peak-to-trough fall")
         with dd_col2:
-            _stat_card("Drawdown duration", f"{dd_stats['maxdd_duration_months']} mo", COLOR_WARN,
-                       icon="⏱️", comment="Months in that worst drawdown episode")
-        with dd_col3:
-            _stat_card("Average drawdown", f"{dd_stats['avgdd'] * 100:.1f}%", COLOR_WARN, icon="〰️",
+            _stat_card("Average drawdown", f"{dd_stats['avgdd'] * 100:.2f}%", COLOR_WARN, icon="〰️",
                        comment="Typical dip, not just the worst one")
-        with dd_col4:
-            _stat_card("CVaR 95 (monthly)", f"{dd_stats['cvar_m'] * 100:.1f}%", COLOR_WARN, icon="🎯",
+        with dd_col3:
+            _stat_card("CVaR 95 (monthly)", f"{dd_stats['cvar_m'] * 100:.2f}%", COLOR_WARN, icon="🎯",
                        comment="Avg of the worst 5% of months")
-        with dd_col5:
-            _stat_card("CVaR 95 (annual)", f"{dd_stats['cvar_a'] * 100:.1f}%", COLOR_WARN, icon="🎯",
+        with dd_col4:
+            _stat_card("CVaR 95 (annual)", f"{dd_stats['cvar_a'] * 100:.2f}%", COLOR_WARN, icon="🎯",
                        comment="Avg of the worst 5% of rolling years")
 
     badges = st.session_state.get(f"game_badges_{granularity}", [])
