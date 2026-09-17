@@ -1711,7 +1711,18 @@ else:
     # Drawdown duration isn't shown here either, matching the results detail page - it's a real
     # ingredient of Score, just not surfaced as its own column (feedback: doesn't read well).
     display_df = ranked.drop(columns=["Allocation", "Drawdown duration (months)"], errors="ignore")
-    st.dataframe(display_df.style.apply(_highlight_podium, axis=1), hide_index=True, use_container_width=True)
+    # st.dataframe/pandas otherwise render these as raw floats with trailing zeros out to full
+    # precision (e.g. "2074336.000000") and no thousands separator - explicit per-column format
+    # strings fix both (feedback: "commas on median pot size", "rid of the zeros at the end").
+    # Only formats columns that actually made it into display_df (backfilled/older rows still
+    # have every LEADERBOARD_COLUMNS key, but this stays safe if a column's ever missing).
+    _dp_formats = {
+        "Score": "{:.2f}", "Probability of ruin": "{:.2f}%", "Median pot size (£)": "£{:,.0f}",
+        "Max drawdown %": "{:.2f}%", "Fund growth %": "{:.2f}%", "Asset classes used": "{:.0f}",
+    }
+    _dp_formats = {c: f for c, f in _dp_formats.items() if c in display_df.columns}
+    st.dataframe(display_df.style.apply(_highlight_podium, axis=1).format(_dp_formats),
+                 hide_index=True, use_container_width=True)
 
 # Everyone's shared moment (champion + leaderboard) has now landed above - each player's own
 # deep-dive stats/charts come last, as optional extras to play with once the headline result is
