@@ -47,10 +47,10 @@ you can find on the day.)*
    reasonable if you don't want to customise. Click **"📡 Publish to all groups"**.
    Nobody sees the actual portfolio builder until you've done this — before that, everyone's
    looking at a "how to play" screen with a **"🔄 Check again"** button. Tell them to hit that
-   once you've published; it unlocks their builder right there (with a little balloons moment).
+   once you've published; it unlocks their builder right there.
 2. **Tell everyone to build and lock in their portfolio.** Each team/person:
    - Enters a team name
-   - Drags sliders (2% steps) or types an exact % for each asset class until they hit 100%
+   - Drags sliders (5% steps) or types an exact % for each asset class until they hit 100%
    - Clicks **"🔒 Lock in my portfolio"**
    - Their score is calculated immediately but stays **hidden** from them — this is deliberate,
      it's what keeps the suspense until you reveal.

@@ -1085,7 +1085,7 @@ st.markdown(
 # right away but nobody sees probability of ruin, crash tests, or the leaderboard's numbers until
 # the host reveals - at which point everyone's own already-computed result unlocks on their next
 # rerun. just_revealed is True for exactly one script run per session (the first rerun after the
-# flag flips), so the drumroll/balloons moment plays once instead of on every later interaction.
+# flag flips), so the drumroll moment plays once instead of on every later interaction.
 host_state = _host_state()
 revealed = host_state.get("revealed", False)
 just_revealed = revealed and not st.session_state.get("_seen_reveal", False)
@@ -1260,15 +1260,15 @@ if not host_state["updated_at"]:
     st.stop()
 
 # Comparing the host's last-published timestamp against what this browser session last saw lets a
-# genuinely fresh publish (not just "still waiting") get its own pop-up moment here, right as the
-# waiting room's auto-reload picks it up - balloons + a toast the very first time a session sees
-# ANY published scenario, a lighter toast-only nudge if the host later republishes a change while
-# this session is already mid-build (still worth flagging, not worth interrupting play for).
+# genuinely fresh publish (not just "still waiting") get its own toast here, right as the waiting
+# room's auto-reload picks it up - the very first time a session sees ANY published scenario, a
+# lighter nudge if the host later republishes a change while this session is already mid-build
+# (still worth flagging, not worth interrupting play for). No balloons here any more (feedback:
+# drop the balloons moments throughout the page) - just the toast.
 _last_seen_publish = st.session_state.get("_seen_published_at")
 if host_state["updated_at"] != _last_seen_publish:
     st.session_state["_seen_published_at"] = host_state["updated_at"]
     if _last_seen_publish is None:
-        st.balloons()
         st.toast("The host has published the scenario - let's build your portfolio!", icon="📡")
     else:
         st.toast("The host just updated the scenario - check the numbers above.", icon="🔄")
@@ -1315,7 +1315,7 @@ if not team_display:
     st.caption("👆 Required - pick a name so your score can go on the leaderboard.")
 
 st.markdown("#### 🏗️ Your allocation")
-st.caption("Set a weight for each asset class you want to hold - drag the slider (2% steps) or "
+st.caption("Set a weight for each asset class you want to hold - drag the slider (5% steps) or "
            "type an exact % in the box beside it. They must add up to 100%; leave one at 0% to "
            "leave it out. Fees are fixed per asset class (a low-cost passive-fund assumption, "
            "shown next to each name) - you can't change them here.")
@@ -1328,14 +1328,14 @@ st.markdown(
 )
 
 # Each row is a linked slider + number_input sharing one logical value. Streamlit widgets can't
-# share a key, so the slider (2% steps) and the box (any typed %) keep their own keys and each
+# share a key, so the slider (5% steps) and the box (any typed %) keep their own keys and each
 # has an on_change callback that mirrors its value onto the other; the number_input is treated as
 # the source of truth for the actual allocation (it carries the exact typed value, the slider
 # just snaps to the nearest even number for a clean coarse control).
 weight_values = []
 _hdr_l, _hdr_s, _hdr_n = st.columns([3, 5, 1.7])
 with _hdr_s:
-    st.caption("WEIGHT %  (2% STEPS)")
+    st.caption("WEIGHT %  (5% STEPS)")
 with _hdr_n:
     st.caption("TYPE %")
 for label in labels:
@@ -1349,7 +1349,7 @@ for label in labels:
         st.session_state[n] = st.session_state[s]
 
     def _sync_from_num(s=sld_key, n=num_key):
-        st.session_state[s] = min(100.0, max(0.0, round(st.session_state[n] / 2.0) * 2.0))
+        st.session_state[s] = min(100.0, max(0.0, round(st.session_state[n] / 5.0) * 5.0))
 
     row_l, row_s, row_n = st.columns([3, 5, 1.7])
     with row_l:
@@ -1370,10 +1370,10 @@ for label in labels:
             unsafe_allow_html=True,
         )
     with row_s:
-        st.slider(label, 0.0, 100.0, step=2.0, key=sld_key, on_change=_sync_from_slider,
+        st.slider(label, 0.0, 100.0, step=5.0, key=sld_key, on_change=_sync_from_slider,
                    label_visibility="collapsed")
     with row_n:
-        st.number_input(label, 0.0, 100.0, step=2.0, key=num_key, on_change=_sync_from_num,
+        st.number_input(label, 0.0, 100.0, step=5.0, key=num_key, on_change=_sync_from_num,
                          label_visibility="collapsed")
     weight_values.append(float(st.session_state[num_key]))
 
@@ -1606,7 +1606,6 @@ else:
             _crown_slot.markdown(f"<div class='suspense-text'>{_msg}</div>", unsafe_allow_html=True)
             time.sleep(0.4)
         _crown_slot.empty()
-        st.balloons()
 
     ranked = leaderboard.sort_values("Score").reset_index(drop=True)
     medals = ["🥇", "🥈", "🥉"]
@@ -1723,8 +1722,6 @@ if has_result and revealed:
         f"</div>",
         unsafe_allow_html=True,
     )
-    if prob_ruin < 0.15:
-        st.balloons()
 
     # The headline numbers together, right under the big reveal card: Score (the actual
     # leaderboard ranking number - see SCORE_WEIGHTS above), then its three ingredients -
