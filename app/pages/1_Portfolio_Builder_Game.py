@@ -116,6 +116,15 @@ st.markdown(
             radial-gradient(rgba(204,204,213,0.35) 1.5px, transparent 1.5px),
             linear-gradient(160deg, {GREY_100}, #ffffff 55%);
         background-size: 30px 30px, 100% 100%;
+        /* This whole page is built around a light background with hardcoded (not theme-aware)
+           colours - a viewer whose own Streamlit theme is set to Dark otherwise gets Streamlit's
+           default DARK/light text colour on top of this still-light background, which is how
+           the asset-class slider labels (plain st.markdown text with no colour of its own) were
+           going invisible - light text on a light page. Forcing the default text colour here,
+           inherited by anything that doesn't set its own (every more specific rule below, e.g.
+           .game-hero's white text, still wins), makes the page render the same and stay legible
+           regardless of the viewer's own theme setting. */
+        color: {CARBON_BLACK};
     }}
 
     div[data-testid="stButton"] > button[kind="primary"] {{
